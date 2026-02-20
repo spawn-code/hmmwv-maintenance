@@ -1594,6 +1594,7 @@ def render_sources(search_results: list):
             relevance = max(0.0, 1.0 - distance) * 100
             snippet   = html_mod.escape(result["text"][:220].replace("\n", " "))
             bar_w     = f"{relevance:.0f}%"
+            ellipsis  = "…" if len(result["text"]) > 220 else ""
 
             rows_html += f"""
             <div class="src-ref-row">
@@ -1601,7 +1602,7 @@ def render_sources(search_results: list):
               <div class="src-ref-meta">
                 <div class="src-ref-file">{source}</div>
                 <div class="src-ref-page">Page {page}</div>
-                <div class="src-ref-text">{snippet}{'…' if len(result['text']) > 220 else ''}</div>
+                <div class="src-ref-text">{snippet}{ellipsis}</div>
               </div>
               <div class="relevance-bar">
                 <div class="relevance-val">{relevance:.0f}%</div>
@@ -1610,7 +1611,57 @@ def render_sources(search_results: list):
             </div>
             """
 
-        st.markdown(f'<div class="src-panel">{rows_html}</div>', unsafe_allow_html=True)
+        src_panel_html = f"""
+        <style>
+          .src-panel {{
+            border: 1px solid #d8ddd0; border-radius: 8px; overflow: hidden;
+            font-family: system-ui, -apple-system, sans-serif; margin: 4px 0;
+            background: #ffffff;
+          }}
+          .src-ref-row {{
+            display: flex; align-items: flex-start; gap: 10px;
+            padding: 10px 12px; border-bottom: 1px solid #e8ebe2;
+            transition: background 0.15s;
+          }}
+          .src-ref-row:last-child {{ border-bottom: none; }}
+          .src-ref-row:hover {{ background: #f0f2ec; }}
+          .src-ref-num {{
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            font-size: 0.65rem; font-weight: 700;
+            background: #7a9e3a; color: #ffffff;
+            border-radius: 4px; padding: 1px 6px; flex-shrink: 0; margin-top: 2px;
+          }}
+          .src-ref-meta {{ flex: 1; min-width: 0; }}
+          .src-ref-file {{
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            font-size: 0.72rem; color: #8a6e2a;
+            font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+          }}
+          .src-ref-page {{
+            font-size: 0.68rem; color: #7a8070; margin: 1px 0 3px;
+          }}
+          .src-ref-text {{
+            font-size: 0.78rem; color: #3a4030; line-height: 1.45;
+          }}
+          .relevance-bar {{
+            display: flex; flex-direction: column; align-items: flex-end;
+            gap: 4px; flex-shrink: 0; min-width: 60px;
+          }}
+          .relevance-val {{
+            font-size: 0.68rem; font-weight: 700; color: #5a6050;
+            font-family: 'JetBrains Mono', monospace;
+          }}
+          .relevance-track {{
+            width: 56px; height: 4px; background: #e0e4d8; border-radius: 2px; overflow: hidden;
+          }}
+          .relevance-fill {{
+            height: 100%; background: linear-gradient(90deg, #7a9e3a, #4B5320);
+            border-radius: 2px; transition: width 0.4s ease;
+          }}
+        </style>
+        <div class="src-panel">{rows_html}</div>
+        """
+        components.html(src_panel_html, height=min(80 + len(search_results) * 90, 600), scrolling=True)
 
         # Page image viewer
         for result in search_results:
@@ -1696,7 +1747,7 @@ def render_print_button(content: str, msg_index: int, sources: list = None):
         var d=w.document; d.open();
         d.write('<!DOCTYPE html><html><head><meta charset="UTF-8">');
         d.write('<title>HMMWV TM Assistant — Print</title>');
-        d.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.6/marked.min.js"><\\/script>');
+        d.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.6/marked.min.js"><' + '/script>');
         d.write('<style>');
         d.write('*{{box-sizing:border-box;margin:0;padding:0}}');
         d.write('body{{font-family:Segoe UI,system-ui,sans-serif;color:#1a1a1a;background:#fff;max-width:780px;margin:0 auto;padding:24px}}');
@@ -1721,14 +1772,14 @@ def render_print_button(content: str, msg_index: int, sources: list = None):
         d.write('.print-btn button{{padding:10px 28px;font-size:14px;cursor:pointer;');
         d.write('background:#4B5320;color:white;border:none;border-radius:6px;font-weight:600;letter-spacing:.5px}}');
         d.write('@media print{{.print-btn{{display:none}}img{{page-break-inside:avoid}}}}');
-        d.write('<\\/style><\\/head><body>');
+        d.write('</style></head><body>');
         d.write('<div class="hdr">');
-        d.write('<div><div class="hdr-title">🔧 HMMWV Technical Assistant<\\/div>');
-        d.write('<div class="hdr-meta">Vehicle: {variant} &nbsp;·&nbsp; {timestamp}<\\/div><\\/div><\\/div>');
-        d.write('<div class="content" id="c"><\\/div>');
-        d.write('<div id="s"><\\/div>');
-        d.write('<div class="print-btn"><button onclick="window.print()">🖨️ Print \/ Save PDF<\\/button><\\/div>');
-        d.write('<\\/body><\\/html>');
+        d.write('<div><div class="hdr-title">🔧 HMMWV Technical Assistant</div>');
+        d.write('<div class="hdr-meta">Vehicle: {variant} &nbsp;·&nbsp; {timestamp}</div></div></div>');
+        d.write('<div class="content" id="c"></div>');
+        d.write('<div id="s"></div>');
+        d.write('<div class="print-btn"><button onclick="window.print()">🖨️ Print / Save PDF</button></div>');
+        d.write('</body></html>');
         d.close();
         w.onload=function(){{
           w.document.getElementById('c').innerHTML=w.marked.parse(md);
