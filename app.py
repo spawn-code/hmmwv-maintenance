@@ -12,10 +12,15 @@ Usage:
 """
 
 import hashlib
+import html as html_mod
 import json
 import logging
+import math
 import re
 import time
+import urllib.error
+import urllib.request
+from collections import Counter
 from pathlib import Path
 from typing import Generator, Optional
 
@@ -29,15 +34,30 @@ BASE_DIR = Path(__file__).resolve().parent
 KNOWLEDGE_BASE_DIR = BASE_DIR / "knowledge_base"
 EXTRACTED_IMAGES_DIR = BASE_DIR / "extracted_images"
 CHROMA_PERSIST_DIR = BASE_DIR / "chroma_db"
+SETTINGS_FILE = BASE_DIR / ".hmmwv_settings.json"
 
 for d in [KNOWLEDGE_BASE_DIR, EXTRACTED_IMAGES_DIR, CHROMA_PERSIST_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
+# ── Provider defaults ──────────────────────────────────────────────────────
 OLLAMA_DEFAULT_URL = "http://localhost:11434"
-OLLAMA_DEFAULT_MODEL = "llama3.1"
+OLLAMA_DEFAULT_MODEL = "gpt-oss:latest"
+
+OPENAI_DEFAULT_URL = "https://api.openai.com/v1"
+OPENAI_DEFAULT_MODEL = "gpt-4o"
+
+ANTHROPIC_DEFAULT_MODEL = "claude-opus-4-6"
+
+# Provider identifiers
+PROVIDER_OLLAMA = "Ollama (Local)"
+PROVIDER_OPENAI = "OpenAI-Compatible"
+PROVIDER_ANTHROPIC = "Anthropic (Claude)"
+
+ALL_PROVIDERS = [PROVIDER_OLLAMA, PROVIDER_OPENAI, PROVIDER_ANTHROPIC]
+
+# ── RAG / chunking constants ───────────────────────────────────────────────
 MAX_TOKENS = 4096
 TEMPERATURE = 0.2
-
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
 TOP_K_RESULTS = 8
@@ -122,6 +142,43 @@ logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# SETTINGS PERSISTENCE
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _default_settings() -> dict:
+    return {
+        "provider": PROVIDER_OLLAMA,
+        "ollama_url": OLLAMA_DEFAULT_URL,
+        "ollama_model": OLLAMA_DEFAULT_MODEL,
+        "openai_url": OPENAI_DEFAULT_URL,
+        "openai_model": OPENAI_DEFAULT_MODEL,
+        "openai_api_key": "",
+        "anthropic_api_key": "",
+        "anthropic_model": ANTHROPIC_DEFAULT_MODEL,
+    }
+
+
+def load_settings() -> dict:
+    """Load persisted settings from disk, merging with defaults."""
+    defaults = _default_settings()
+    if SETTINGS_FILE.exists():
+        try:
+            saved = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+            defaults.update(saved)
+        except Exception:
+            pass
+    return defaults
+
+
+def save_settings(settings: dict):
+    """Persist settings to disk (API keys are stored; users accept that risk)."""
+    try:
+        SETTINGS_FILE.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    except Exception as e:
+        logger.warning(f"Could not save settings: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # PDF PROCESSOR
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -162,7 +219,7 @@ class PDFProcessor:
     def _clean_text(self, text: str) -> str:
         text = re.sub(r"[ \t]+", " ", text)
         text = re.sub(r"\n{3,}", "\n\n", text)
-        # Fix common UTF-8 mojibake from PDF extraction (using unicode escapes)
+        # Fix common UTF-8 mojibake from PDF extraction
         mojibake_map = {
             "\u00e2\u0080\u0094": "\u2014",  # em dash
             "\u00e2\u0080\u0093": "\u2013",  # en dash
@@ -185,7 +242,6 @@ class PDFProcessor:
         }
         for bad, good in mojibake_map.items():
             text = text.replace(bad, good)
-        # Also fix pattern where \u00c2 precedes a valid char (double-encoding artifact)
         text = re.sub(r"\u00c2([\u00a0-\u00ff])", r"\1", text)
         return text.strip()
 
@@ -213,47 +269,84 @@ class PDFProcessor:
             logger.error(f"Error extracting text from {pdf_path.name}: {e}")
         return documents
 
+    def _split_long_paragraph(self, para: str) -> list[str]:
+        """Split a paragraph that exceeds CHUNK_SIZE on sentence boundaries."""
+        if len(para) <= CHUNK_SIZE:
+            return [para]
+        # Split on sentence-ending punctuation followed by whitespace
+        sentences = re.split(r"(?<=[.!?])\s+", para)
+        parts = []
+        current = ""
+        for sentence in sentences:
+            if len(current) + len(sentence) + 1 > CHUNK_SIZE and current:
+                parts.append(current.strip())
+                current = sentence
+            else:
+                current = current + " " + sentence if current else sentence
+        if current.strip():
+            parts.append(current.strip())
+        return parts if parts else [para]
+
     def chunk_documents(self, documents: list) -> list:
-        chunks = []
+        """
+        Split page-level documents into overlapping chunks.
+        Handles paragraphs longer than CHUNK_SIZE by further splitting on
+        sentence boundaries. Fixes total_chunks to only backfill within
+        the current document's chunks.
+        """
+        all_chunks = []
         for doc in documents:
             text = doc["text"]
             meta = doc["metadata"]
+            doc_chunks = []
 
             if len(text) <= CHUNK_SIZE:
-                chunks.append({
+                doc_chunks.append({
                     "text": text,
                     "metadata": {**meta, "chunk_index": 0, "total_chunks": 1},
                 })
-                continue
+            else:
+                # Split on paragraph boundaries; further split long paragraphs
+                raw_paragraphs = text.split("\n\n")
+                paragraphs: list[str] = []
+                for para in raw_paragraphs:
+                    paragraphs.extend(self._split_long_paragraph(para))
 
-            paragraphs = text.split("\n\n")
-            current_chunk = ""
-            chunk_idx = 0
+                current_chunk = ""
+                chunk_idx = 0
 
-            for para in paragraphs:
-                if len(current_chunk) + len(para) + 2 > CHUNK_SIZE and current_chunk:
-                    chunks.append({
+                for para in paragraphs:
+                    if len(current_chunk) + len(para) + 2 > CHUNK_SIZE and current_chunk:
+                        doc_chunks.append({
+                            "text": current_chunk.strip(),
+                            "metadata": {**meta, "chunk_index": chunk_idx},
+                        })
+                        overlap_text = (
+                            current_chunk[-CHUNK_OVERLAP:]
+                            if len(current_chunk) > CHUNK_OVERLAP
+                            else current_chunk
+                        )
+                        current_chunk = overlap_text + "\n\n" + para
+                        chunk_idx += 1
+                    else:
+                        current_chunk = current_chunk + "\n\n" + para if current_chunk else para
+
+                if current_chunk.strip():
+                    doc_chunks.append({
                         "text": current_chunk.strip(),
                         "metadata": {**meta, "chunk_index": chunk_idx},
                     })
-                    overlap_text = current_chunk[-CHUNK_OVERLAP:] if len(current_chunk) > CHUNK_OVERLAP else current_chunk
-                    current_chunk = overlap_text + "\n\n" + para
-                    chunk_idx += 1
-                else:
-                    current_chunk = current_chunk + "\n\n" + para if current_chunk else para
 
-            if current_chunk.strip():
-                chunks.append({
-                    "text": current_chunk.strip(),
-                    "metadata": {**meta, "chunk_index": chunk_idx},
-                })
+                # Backfill total_chunks only for this document's chunks
+                total = chunk_idx + 1
+                for c in doc_chunks:
+                    if c["metadata"].get("total_chunks") is None:
+                        c["metadata"]["total_chunks"] = total
 
-            for c in chunks:
-                if c["metadata"].get("total_chunks") is None:
-                    c["metadata"]["total_chunks"] = chunk_idx + 1
+            all_chunks.extend(doc_chunks)
 
-        logger.info(f"Created {len(chunks)} chunks from {len(documents)} documents")
-        return chunks
+        logger.info(f"Created {len(all_chunks)} chunks from {len(documents)} documents")
+        return all_chunks
 
     def extract_images_from_pdf(self, pdf_path: Path) -> list:
         import pdfplumber
@@ -363,9 +456,6 @@ class PDFProcessor:
 # VECTOR STORE  (Pure-Python TF-IDF — no ChromaDB, no Pydantic)
 # ═══════════════════════════════════════════════════════════════════════════
 
-import math
-from collections import Counter
-
 class VectorStore:
     """
     Lightweight TF-IDF vector store with cosine similarity.
@@ -379,9 +469,9 @@ class VectorStore:
         self._metadatas: list[dict] = []
         self._ids: list[str] = []
         # TF-IDF state
-        self._vocab: dict[str, int] = {}      # term → index
-        self._idf: list[float] = []            # idf weight per vocab term
-        self._tfidf_matrix: list[list[float]] = []  # docs × vocab
+        self._vocab: dict[str, int] = {}
+        self._idf: list[float] = []
+        self._tfidf_matrix: list[list[float]] = []
         self._initialized = False
 
     # ── Persistence ────────────────────────────────────────────────────────
@@ -405,7 +495,7 @@ class VectorStore:
             self._metadatas = data.get("metadatas", [])
             self._ids = data.get("ids", [])
 
-    # ── Tokeniser (simple but effective for technical text) ────────────────
+    # ── Tokeniser ─────────────────────────────────────────────────────────
 
     @staticmethod
     def _tokenize(text: str) -> list[str]:
@@ -420,16 +510,13 @@ class VectorStore:
             self._vocab, self._idf, self._tfidf_matrix = {}, [], []
             return
 
-        # Tokenize all docs
         doc_tokens = [self._tokenize(d) for d in self._documents]
         n_docs = len(doc_tokens)
 
-        # Build vocabulary from document frequency
         df: Counter = Counter()
         for tokens in doc_tokens:
             df.update(set(tokens))
 
-        # Keep terms appearing in at least 1 doc, at most 95% of docs
         max_df = max(1, int(n_docs * 0.95))
         self._vocab = {}
         idx = 0
@@ -440,12 +527,10 @@ class VectorStore:
 
         vocab_size = len(self._vocab)
 
-        # IDF: log(N / df) + 1
         self._idf = [0.0] * vocab_size
         for term, i in self._vocab.items():
             self._idf[i] = math.log(n_docs / (df[term] + 1)) + 1.0
 
-        # TF-IDF vectors (L2-normalised)
         self._tfidf_matrix = []
         for tokens in doc_tokens:
             tf = Counter(tokens)
@@ -453,8 +538,7 @@ class VectorStore:
             for term, count in tf.items():
                 if term in self._vocab:
                     i = self._vocab[term]
-                    vec[i] = (1 + math.log(count)) * self._idf[i]  # log-normalised TF
-            # L2 normalise
+                    vec[i] = (1 + math.log(count)) * self._idf[i]
             norm = math.sqrt(sum(v * v for v in vec)) or 1.0
             self._tfidf_matrix.append([v / norm for v in vec])
 
@@ -479,7 +563,7 @@ class VectorStore:
             chunk_idx = chunk["metadata"].get("chunk_index", i)
             doc_id = f"{source}__p{page}__c{chunk_idx}"
             if doc_id in existing_ids:
-                continue  # skip duplicates
+                continue
             self._ids.append(doc_id)
             self._documents.append(chunk["text"])
             flat = {}
@@ -498,7 +582,6 @@ class VectorStore:
         if not self._documents:
             return []
 
-        # Vectorise query
         tokens = self._tokenize(query)
         tf = Counter(tokens)
         vocab_size = len(self._vocab)
@@ -510,10 +593,8 @@ class VectorStore:
         q_norm = math.sqrt(sum(v * v for v in q_vec)) or 1.0
         q_vec = [v / q_norm for v in q_vec]
 
-        # Cosine similarity against all docs
         scores = []
         for idx, doc_vec in enumerate(self._tfidf_matrix):
-            # Optional metadata filter
             if where:
                 meta = self._metadatas[idx]
                 if not all(meta.get(k) == v for k, v in where.items()):
@@ -521,7 +602,6 @@ class VectorStore:
             sim = sum(q * d for q, d in zip(q_vec, doc_vec))
             scores.append((idx, sim))
 
-        # Sort descending by similarity
         scores.sort(key=lambda x: x[1], reverse=True)
 
         results = []
@@ -529,7 +609,7 @@ class VectorStore:
             results.append({
                 "text": self._documents[idx],
                 "metadata": self._metadatas[idx],
-                "distance": 1.0 - sim,  # convert similarity to distance
+                "distance": 1.0 - sim,
                 "id": self._ids[idx],
             })
         return results
@@ -555,24 +635,32 @@ class VectorStore:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# AI ENGINE  (Ollama — fully local, no cloud API)
+# AI ENGINE  — multi-provider (Ollama, OpenAI-compatible, Anthropic)
 # ═══════════════════════════════════════════════════════════════════════════
 
-import urllib.request
-import urllib.error
-
 class AIEngine:
-    """Ollama-based local AI engine with RAG context for HMMWV technical queries."""
+    """
+    Multi-provider AI engine supporting:
+      - Ollama  (local, no key needed)
+      - OpenAI-compatible REST API  (OpenAI, Together, Groq, local vLLM, etc.)
+      - Anthropic Claude API
+    """
 
-    def __init__(self, base_url: str = OLLAMA_DEFAULT_URL, model: str = OLLAMA_DEFAULT_MODEL):
-        self.base_url = base_url.rstrip("/")
-        self.model = model
+    def __init__(self, provider: str, **kwargs):
+        """
+        provider: one of PROVIDER_OLLAMA, PROVIDER_OPENAI, PROVIDER_ANTHROPIC
+        kwargs:
+          Ollama:    base_url, model
+          OpenAI:    base_url, model, api_key
+          Anthropic: api_key, model
+        """
+        self.provider = provider
+        self._cfg = kwargs
 
-    # ── Ollama Connectivity ────────────────────────────────────────────────
+    # ── Ollama helpers ─────────────────────────────────────────────────────
 
     @staticmethod
     def check_ollama(base_url: str = OLLAMA_DEFAULT_URL) -> bool:
-        """Return True if Ollama is reachable."""
         try:
             req = urllib.request.Request(f"{base_url}/api/tags", method="GET")
             with urllib.request.urlopen(req, timeout=3):
@@ -581,8 +669,7 @@ class AIEngine:
             return False
 
     @staticmethod
-    def list_models(base_url: str = OLLAMA_DEFAULT_URL) -> list[str]:
-        """Fetch available model names from Ollama."""
+    def list_ollama_models(base_url: str = OLLAMA_DEFAULT_URL) -> list[str]:
         try:
             req = urllib.request.Request(f"{base_url}/api/tags", method="GET")
             with urllib.request.urlopen(req, timeout=5) as resp:
@@ -591,7 +678,7 @@ class AIEngine:
         except Exception:
             return []
 
-    # ── Context Formatting ─────────────────────────────────────────────────
+    # ── Context / message helpers ──────────────────────────────────────────
 
     def _format_context(self, search_results: list) -> str:
         if not search_results:
@@ -623,22 +710,13 @@ class AIEngine:
         parts.append(f"\n## Mechanic's Question\n{query}")
         return "\n".join(parts)
 
-    # ── Streaming Chat via Ollama /api/chat ────────────────────────────────
+    # ── Ollama streaming ───────────────────────────────────────────────────
 
-    def chat_stream(self, query, search_results, conversation_history=None,
-                    vehicle_variant="", maintenance_category="") -> Generator[str, None, None]:
-
-        context = self._format_context(search_results)
-        user_message = self._build_user_message(query, context, vehicle_variant, maintenance_category)
-
-        # Build messages list: system + history + user
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        if conversation_history:
-            messages.extend(conversation_history)
-        messages.append({"role": "user", "content": user_message})
-
+    def _stream_ollama(self, messages: list) -> Generator[str, None, None]:
+        base_url = self._cfg.get("base_url", OLLAMA_DEFAULT_URL).rstrip("/")
+        model = self._cfg.get("model", OLLAMA_DEFAULT_MODEL)
         payload = json.dumps({
-            "model": self.model,
+            "model": model,
             "messages": messages,
             "stream": True,
             "options": {
@@ -646,14 +724,12 @@ class AIEngine:
                 "num_predict": MAX_TOKENS,
             },
         }).encode("utf-8")
-
         req = urllib.request.Request(
-            f"{self.base_url}/api/chat",
+            f"{base_url}/api/chat",
             data=payload,
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
                 for line in resp:
@@ -670,22 +746,185 @@ class AIEngine:
                     except json.JSONDecodeError:
                         continue
         except urllib.error.URLError as e:
-            yield f"❌ **Connection Error**: Cannot reach Ollama at `{self.base_url}`. Is it running?\n\nError: {e.reason}"
+            yield (
+                f"❌ **Connection Error**: Cannot reach Ollama at `{base_url}`. "
+                f"Is it running?\n\nError: {e.reason}"
+            )
         except Exception as e:
             logger.error(f"Ollama stream error: {e}")
             yield f"❌ **Error**: {e}"
 
-    def diagnose(self, symptoms, search_results, vehicle_variant="") -> str:
+    # ── OpenAI-compatible streaming ────────────────────────────────────────
+
+    def _stream_openai(self, messages: list) -> Generator[str, None, None]:
+        base_url = self._cfg.get("base_url", OPENAI_DEFAULT_URL).rstrip("/")
+        model = self._cfg.get("model", OPENAI_DEFAULT_MODEL)
+        api_key = self._cfg.get("api_key", "")
+        payload = json.dumps({
+            "model": model,
+            "messages": messages,
+            "stream": True,
+            "max_tokens": MAX_TOKENS,
+            "temperature": TEMPERATURE,
+        }).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        req = urllib.request.Request(
+            f"{base_url}/chat/completions",
+            data=payload,
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                for line in resp:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    decoded = line.decode("utf-8")
+                    if decoded.startswith("data: "):
+                        decoded = decoded[6:]
+                    if decoded == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(decoded)
+                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        token = delta.get("content", "")
+                        if token:
+                            yield token
+                    except json.JSONDecodeError:
+                        continue
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8")
+            except Exception:
+                pass
+            yield f"❌ **API Error {e.code}**: {e.reason}\n\n{body}"
+        except urllib.error.URLError as e:
+            yield f"❌ **Connection Error**: Cannot reach `{base_url}`.\n\nError: {e.reason}"
+        except Exception as e:
+            logger.error(f"OpenAI stream error: {e}")
+            yield f"❌ **Error**: {e}"
+
+    # ── Anthropic streaming ────────────────────────────────────────────────
+
+    def _stream_anthropic(self, messages: list) -> Generator[str, None, None]:
+        api_key = self._cfg.get("api_key", "")
+        model = self._cfg.get("model", ANTHROPIC_DEFAULT_MODEL)
+        if not api_key:
+            yield "❌ **Error**: Anthropic API key is required. Enter it in the sidebar."
+            return
+        # Anthropic uses a separate system field; strip it from messages if present
+        sys_msg = ""
+        filtered = []
+        for m in messages:
+            if m["role"] == "system":
+                sys_msg = m["content"]
+            else:
+                filtered.append(m)
+        payload = json.dumps({
+            "model": model,
+            "max_tokens": MAX_TOKENS,
+            "temperature": TEMPERATURE,
+            "system": sys_msg or SYSTEM_PROMPT,
+            "messages": filtered,
+            "stream": True,
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "https://api.anthropic.com/v1/messages",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                for line in resp:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    decoded = line.decode("utf-8")
+                    if decoded.startswith("data: "):
+                        decoded = decoded[6:]
+                    try:
+                        event = json.loads(decoded)
+                        etype = event.get("type", "")
+                        if etype == "content_block_delta":
+                            delta = event.get("delta", {})
+                            if delta.get("type") == "text_delta":
+                                yield delta.get("text", "")
+                        elif etype == "message_stop":
+                            break
+                        elif etype == "error":
+                            yield f"❌ **Anthropic Error**: {event.get('error', {}).get('message', 'Unknown error')}"
+                            break
+                    except json.JSONDecodeError:
+                        continue
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8")
+            except Exception:
+                pass
+            yield f"❌ **API Error {e.code}**: {e.reason}\n\n{body}"
+        except urllib.error.URLError as e:
+            yield f"❌ **Connection Error**: Cannot reach Anthropic API.\n\nError: {e.reason}"
+        except Exception as e:
+            logger.error(f"Anthropic stream error: {e}")
+            yield f"❌ **Error**: {e}"
+
+    # ── Public streaming interface ─────────────────────────────────────────
+
+    def chat_stream(
+        self,
+        query: str,
+        search_results: list,
+        conversation_history: list = None,
+        vehicle_variant: str = "",
+        maintenance_category: str = "",
+    ) -> Generator[str, None, None]:
+        context = self._format_context(search_results)
+        user_message = self._build_user_message(
+            query, context, vehicle_variant, maintenance_category
+        )
+
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        if conversation_history:
+            messages.extend(conversation_history)
+        messages.append({"role": "user", "content": user_message})
+
+        if self.provider == PROVIDER_OLLAMA:
+            yield from self._stream_ollama(messages)
+        elif self.provider == PROVIDER_OPENAI:
+            yield from self._stream_openai(messages)
+        elif self.provider == PROVIDER_ANTHROPIC:
+            yield from self._stream_anthropic(messages)
+        else:
+            yield f"❌ Unknown provider: {self.provider}"
+
+    def diagnose(
+        self,
+        symptoms: str,
+        search_results: list,
+        vehicle_variant: str = "",
+    ) -> Generator[str, None, None]:
+        """Diagnostic mode — yields tokens just like chat_stream."""
         prefix = (
             "The mechanic is reporting the following symptoms and needs help "
             "diagnosing the issue. Provide a structured troubleshooting guide "
             "starting with the most likely causes, organized from simplest to "
             "most complex checks:\n\n"
         )
-        full_response = ""
-        for chunk in self.chat_stream(prefix + symptoms, search_results, vehicle_variant=vehicle_variant):
-            full_response += chunk
-        return full_response
+        yield from self.chat_stream(
+            prefix + symptoms,
+            search_results,
+            vehicle_variant=vehicle_variant,
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -761,16 +1000,31 @@ st.markdown("""
 # ── Session State ──────────────────────────────────────────────────────────
 
 def init_session():
-    defaults = {
-        "messages": [], "vehicle_variant": "",
-        "maintenance_category": "", "kb_initialized": False,
-        "mode": "chat", "show_sources": True, "search_results_cache": [],
-        "ollama_url": OLLAMA_DEFAULT_URL,
-        "ollama_model": OLLAMA_DEFAULT_MODEL,
+    # Load persisted settings once per session
+    if "_settings_loaded" not in st.session_state:
+        saved = load_settings()
+        st.session_state._settings_loaded = True
+        st.session_state.provider = saved["provider"]
+        st.session_state.ollama_url = saved["ollama_url"]
+        st.session_state.ollama_model = saved["ollama_model"]
+        st.session_state.openai_url = saved["openai_url"]
+        st.session_state.openai_model = saved["openai_model"]
+        st.session_state.openai_api_key = saved["openai_api_key"]
+        st.session_state.anthropic_api_key = saved["anthropic_api_key"]
+        st.session_state.anthropic_model = saved["anthropic_model"]
+
+    runtime_defaults = {
+        "messages": [],
+        "vehicle_variant": "",
+        "maintenance_category": "",
+        "mode": "chat",
+        "show_sources": True,
+        "search_results_cache": [],
     }
-    for k, v in defaults.items():
+    for k, v in runtime_defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
+
 
 init_session()
 
@@ -781,58 +1035,210 @@ init_session()
 def get_pdf_processor():
     return PDFProcessor()
 
+
 @st.cache_resource
 def get_vector_store():
     vs = VectorStore()
     vs.initialize()
     return vs
 
-def get_ai_engine():
-    url = st.session_state.ollama_url
-    model = st.session_state.ollama_model
-    cache_key = f"{url}|{model}"
-    if "ai_engine" not in st.session_state or st.session_state.get("_ai_cache_key") != cache_key:
-        st.session_state.ai_engine = AIEngine(base_url=url, model=model)
+
+def _collect_settings_from_state() -> dict:
+    """Pull current provider config from session state."""
+    return {
+        "provider": st.session_state.provider,
+        "ollama_url": st.session_state.ollama_url,
+        "ollama_model": st.session_state.ollama_model,
+        "openai_url": st.session_state.openai_url,
+        "openai_model": st.session_state.openai_model,
+        "openai_api_key": st.session_state.openai_api_key,
+        "anthropic_api_key": st.session_state.anthropic_api_key,
+        "anthropic_model": st.session_state.anthropic_model,
+    }
+
+
+def get_ai_engine() -> AIEngine:
+    provider = st.session_state.provider
+    cache_key = json.dumps(_collect_settings_from_state(), sort_keys=True)
+    if (
+        "ai_engine" not in st.session_state
+        or st.session_state.get("_ai_cache_key") != cache_key
+    ):
+        if provider == PROVIDER_OLLAMA:
+            engine = AIEngine(
+                provider,
+                base_url=st.session_state.ollama_url,
+                model=st.session_state.ollama_model,
+            )
+        elif provider == PROVIDER_OPENAI:
+            engine = AIEngine(
+                provider,
+                base_url=st.session_state.openai_url,
+                model=st.session_state.openai_model,
+                api_key=st.session_state.openai_api_key,
+            )
+        elif provider == PROVIDER_ANTHROPIC:
+            engine = AIEngine(
+                provider,
+                api_key=st.session_state.anthropic_api_key,
+                model=st.session_state.anthropic_model,
+            )
+        else:
+            engine = AIEngine(PROVIDER_OLLAMA)
+        st.session_state.ai_engine = engine
         st.session_state._ai_cache_key = cache_key
     return st.session_state.ai_engine
 
 
 # ── Sidebar ────────────────────────────────────────────────────────────────
 
-def render_sidebar():
-    with st.sidebar:
-        st.markdown("### 🦙 OLLAMA CONNECTION")
+def _provider_section():
+    """Render the AI provider configuration block in the sidebar."""
+    st.markdown("### 🤖 AI PROVIDER")
 
+    provider = st.selectbox(
+        "Provider",
+        ALL_PROVIDERS,
+        index=ALL_PROVIDERS.index(st.session_state.provider)
+        if st.session_state.provider in ALL_PROVIDERS
+        else 0,
+        key="_provider_select",
+    )
+
+    settings_changed = False
+
+    if provider != st.session_state.provider:
+        st.session_state.provider = provider
+        settings_changed = True
+
+    # ── Ollama ──────────────────────────────────────────────────────────
+    if provider == PROVIDER_OLLAMA:
         ollama_url = st.text_input(
             "Ollama URL",
             value=st.session_state.ollama_url,
             help="Default: http://localhost:11434",
+            key="_ollama_url",
         )
         if ollama_url != st.session_state.ollama_url:
             st.session_state.ollama_url = ollama_url
+            settings_changed = True
 
-        # Check connectivity and list models
         is_connected = AIEngine.check_ollama(ollama_url)
         if is_connected:
-            available_models = AIEngine.list_models(ollama_url)
+            available_models = AIEngine.list_ollama_models(ollama_url)
             if available_models:
-                # Try to keep current selection, fall back to first available
                 current = st.session_state.ollama_model
-                default_idx = 0
-                if current in available_models:
-                    default_idx = available_models.index(current)
-                selected = st.selectbox("Model", available_models, index=default_idx,
-                                        help="Models available in your local Ollama instance")
-                st.session_state.ollama_model = selected
+                default_idx = available_models.index(current) if current in available_models else 0
+                selected = st.selectbox(
+                    "Model",
+                    available_models,
+                    index=default_idx,
+                    help="Models available in your local Ollama instance",
+                    key="_ollama_model",
+                )
+                if selected != st.session_state.ollama_model:
+                    st.session_state.ollama_model = selected
+                    settings_changed = True
                 st.success(f"✅ Connected — {len(available_models)} model(s)")
             else:
-                st.warning("Connected but no models found. Run:\n`ollama pull llama3.1`")
+                # Allow freeform model entry when no models are listed
+                model_input = st.text_input(
+                    "Model name",
+                    value=st.session_state.ollama_model,
+                    help="e.g. gpt-oss:latest",
+                    key="_ollama_model_text",
+                )
+                if model_input != st.session_state.ollama_model:
+                    st.session_state.ollama_model = model_input
+                    settings_changed = True
+                st.warning("Connected but no models found. Run:\n`ollama pull gpt-oss:latest`")
         else:
+            model_input = st.text_input(
+                "Model name",
+                value=st.session_state.ollama_model,
+                help="Model to use once Ollama is running",
+                key="_ollama_model_offline",
+            )
+            if model_input != st.session_state.ollama_model:
+                st.session_state.ollama_model = model_input
+                settings_changed = True
             st.error(
                 "❌ Cannot reach Ollama.\n\n"
                 "**Start it with:**\n```\nollama serve\n```\n"
-                "**Then pull a model:**\n```\nollama pull llama3.1\n```"
+                "**Then pull a model:**\n```\nollama pull gpt-oss:latest\n```"
             )
+
+    # ── OpenAI-compatible ────────────────────────────────────────────────
+    elif provider == PROVIDER_OPENAI:
+        openai_url = st.text_input(
+            "API Base URL",
+            value=st.session_state.openai_url,
+            help="e.g. https://api.openai.com/v1  or  http://localhost:8000/v1",
+            key="_openai_url",
+        )
+        if openai_url != st.session_state.openai_url:
+            st.session_state.openai_url = openai_url
+            settings_changed = True
+
+        openai_model = st.text_input(
+            "Model",
+            value=st.session_state.openai_model,
+            help="e.g. gpt-4o, gpt-4o-mini, mistral-7b-instruct",
+            key="_openai_model",
+        )
+        if openai_model != st.session_state.openai_model:
+            st.session_state.openai_model = openai_model
+            settings_changed = True
+
+        openai_key = st.text_input(
+            "API Key",
+            value=st.session_state.openai_api_key,
+            type="password",
+            help="Leave blank for local/no-auth endpoints",
+            key="_openai_key",
+        )
+        if openai_key != st.session_state.openai_api_key:
+            st.session_state.openai_api_key = openai_key
+            settings_changed = True
+
+        st.caption("Compatible with OpenAI, Together AI, Groq, vLLM, LM Studio, etc.")
+
+    # ── Anthropic ────────────────────────────────────────────────────────
+    elif provider == PROVIDER_ANTHROPIC:
+        anthropic_key = st.text_input(
+            "API Key",
+            value=st.session_state.anthropic_api_key,
+            type="password",
+            help="Your Anthropic API key (sk-ant-...)",
+            key="_anthropic_key",
+        )
+        if anthropic_key != st.session_state.anthropic_api_key:
+            st.session_state.anthropic_api_key = anthropic_key
+            settings_changed = True
+
+        anthropic_model = st.text_input(
+            "Model",
+            value=st.session_state.anthropic_model,
+            help="e.g. claude-opus-4-6, claude-sonnet-4-5-20250929",
+            key="_anthropic_model",
+        )
+        if anthropic_model != st.session_state.anthropic_model:
+            st.session_state.anthropic_model = anthropic_model
+            settings_changed = True
+
+        if st.session_state.anthropic_api_key:
+            st.success("✅ API key configured")
+        else:
+            st.warning("Enter your Anthropic API key above.")
+
+    # Persist whenever something changed
+    if settings_changed:
+        save_settings(_collect_settings_from_state())
+
+
+def render_sidebar():
+    with st.sidebar:
+        _provider_section()
 
         st.divider()
         st.markdown("### 🚛 VEHICLE")
@@ -843,9 +1249,20 @@ def render_sidebar():
 
         st.divider()
         st.markdown("### 🎯 MODE")
-        mode = st.radio("Assistant Mode", ["💬 Chat", "🔍 Diagnose", "📋 PMCS Walkthrough"],
-                        help="**Chat**: General queries  \n**Diagnose**: Symptom-based troubleshooting  \n**PMCS**: Guided checklists")
-        st.session_state.mode = {"💬 Chat": "chat", "🔍 Diagnose": "diagnose", "📋 PMCS Walkthrough": "pmcs"}[mode]
+        mode = st.radio(
+            "Assistant Mode",
+            ["💬 Chat", "🔍 Diagnose", "📋 PMCS Walkthrough"],
+            help=(
+                "**Chat**: General queries  \n"
+                "**Diagnose**: Symptom-based troubleshooting  \n"
+                "**PMCS**: Guided checklists"
+            ),
+        )
+        st.session_state.mode = {
+            "💬 Chat": "chat",
+            "🔍 Diagnose": "diagnose",
+            "📋 PMCS Walkthrough": "pmcs",
+        }[mode]
 
         st.divider()
         st.markdown("### 📚 KNOWLEDGE BASE")
@@ -858,8 +1275,12 @@ def render_sidebar():
         c1.metric("PDFs", status["total_pdfs"])
         c2.metric("Chunks", vs_stats["total_chunks"])
 
-        uploaded = st.file_uploader("Upload TM PDFs", type=["pdf"], accept_multiple_files=True,
-                                    help="Upload HMMWV TMs (TM 9-2320-280-XX)")
+        uploaded = st.file_uploader(
+            "Upload TM PDFs",
+            type=["pdf"],
+            accept_multiple_files=True,
+            help="Upload HMMWV TMs (TM 9-2320-280-XX)",
+        )
         if uploaded:
             for f in uploaded:
                 dest = KNOWLEDGE_BASE_DIR / f.name
@@ -870,12 +1291,16 @@ def render_sidebar():
         unproc = status["unprocessed"]
         if unproc > 0:
             st.warning(f"{unproc} PDF(s) need processing")
-            if st.button("🔄 Process PDFs", width="stretch", type="primary"):
+            if st.button("🔄 Process PDFs", use_container_width=True, type="primary"):
                 with st.spinner("Processing PDFs… this may take a few minutes."):
                     result = proc.process_all_pdfs()
                     if result["chunks"]:
                         vs.add_chunks(result["chunks"])
-                    st.success(f"✅ {result['total_pdfs']} PDFs → {result['total_chunks']} chunks, {result['total_images']} images")
+                    st.success(
+                        f"✅ {result['total_pdfs']} PDFs → "
+                        f"{result['total_chunks']} chunks, "
+                        f"{result['total_images']} images"
+                    )
                     st.rerun()
         elif status["total_pdfs"] > 0:
             st.success("✅ All PDFs processed")
@@ -884,7 +1309,7 @@ def render_sidebar():
 
         if status["total_pdfs"] > 0:
             with st.expander("Advanced"):
-                if st.button("♻️ Reprocess All", width="stretch"):
+                if st.button("♻️ Reprocess All", use_container_width=True):
                     with st.spinner("Reprocessing…"):
                         vs.clear()
                         result = proc.process_all_pdfs(force=True)
@@ -898,11 +1323,14 @@ def render_sidebar():
             st.divider()
             st.markdown("### 📑 INDEXED SOURCES")
             for src in vs_stats["source_files"]:
-                st.markdown(f"<div class='ref-card'><span class='source-name'>📄 {src}</span></div>",
-                            unsafe_allow_html=True)
+                safe_src = html_mod.escape(src)
+                st.markdown(
+                    f"<div class='ref-card'><span class='source-name'>📄 {safe_src}</span></div>",
+                    unsafe_allow_html=True,
+                )
 
         st.divider()
-        if st.button("🗑️ Clear Conversation", width="stretch"):
+        if st.button("🗑️ Clear Conversation", use_container_width=True):
             st.session_state.messages = []
             st.rerun()
 
@@ -913,26 +1341,53 @@ def render_header():
     st.markdown("""
     <div class="header-banner">
         <h1>🔧 HMMWV TECHNICAL ASSISTANT</h1>
-        <p>Local AI-Powered Maintenance & Repair Guide — Ollama + TM 9-2320-280 Series</p>
+        <p>Local AI-Powered Maintenance &amp; Repair Guide — Ollama + TM 9-2320-280 Series</p>
     </div>""", unsafe_allow_html=True)
 
     vs = get_vector_store()
     stats = vs.get_stats()
-    ollama_ok = AIEngine.check_ollama(st.session_state.ollama_url)
+    provider = st.session_state.provider
     has_data = stats["total_chunks"] > 0
+
+    # Determine provider connectivity label
+    if provider == PROVIDER_OLLAMA:
+        ollama_ok = AIEngine.check_ollama(st.session_state.ollama_url)
+        provider_ready = ollama_ok
+        provider_label = (
+            f"OLLAMA ● {st.session_state.ollama_model}" if ollama_ok else "OLLAMA OFFLINE"
+        )
+    elif provider == PROVIDER_OPENAI:
+        provider_ready = bool(st.session_state.openai_url)
+        provider_label = f"OPENAI-COMPAT ● {st.session_state.openai_model}"
+    elif provider == PROVIDER_ANTHROPIC:
+        provider_ready = bool(st.session_state.anthropic_api_key)
+        provider_label = f"ANTHROPIC ● {st.session_state.anthropic_model}"
+    else:
+        provider_ready = False
+        provider_label = "UNKNOWN PROVIDER"
 
     cols = st.columns([2, 2, 2, 4])
     with cols[0]:
-        badge = "status-ready" if ollama_ok else "status-error"
-        label = f"OLLAMA ● {st.session_state.ollama_model}" if ollama_ok else "OLLAMA OFFLINE"
-        st.markdown(f'<span class="status-badge {badge}">● {label}</span>', unsafe_allow_html=True)
+        badge = "status-ready" if provider_ready else "status-error"
+        safe_label = html_mod.escape(provider_label)
+        st.markdown(
+            f'<span class="status-badge {badge}">● {safe_label}</span>',
+            unsafe_allow_html=True,
+        )
     with cols[1]:
         badge = "status-ready" if has_data else "status-processing"
         label = f'{stats["total_chunks"]} CHUNKS INDEXED' if has_data else "NO DATA LOADED"
-        st.markdown(f'<span class="status-badge {badge}">● {label}</span>', unsafe_allow_html=True)
+        st.markdown(
+            f'<span class="status-badge {badge}">● {label}</span>',
+            unsafe_allow_html=True,
+        )
     with cols[2]:
         v = st.session_state.vehicle_variant or "Any Variant"
-        st.markdown(f'<span class="status-badge status-ready">● {v.split("—")[0].strip()}</span>', unsafe_allow_html=True)
+        safe_v = html_mod.escape(v.split("—")[0].strip())
+        st.markdown(
+            f'<span class="status-badge status-ready">● {safe_v}</span>',
+            unsafe_allow_html=True,
+        )
 
 
 # ── Quick Actions ──────────────────────────────────────────────────────────
@@ -969,7 +1424,7 @@ def render_quick_actions():
     cols = st.columns(3)
     for i, (label, prompt) in enumerate(current):
         with cols[i % 3]:
-            if st.button(label, width="stretch", key=f"qa_{i}"):
+            if st.button(label, use_container_width=True, key=f"qa_{i}"):
                 return prompt
     return None
 
@@ -986,7 +1441,10 @@ def render_sources(search_results: list):
             page = meta.get("page_number", "?")
             distance = result.get("distance", 0)
             relevance = max(0, (1 - distance)) * 100
-            st.markdown(f"**Ref {i+1}** — `{source}` page {page} (relevance: {relevance:.0f}%)")
+            safe_source = html_mod.escape(str(source))
+            st.markdown(
+                f"**Ref {i+1}** — `{safe_source}` page {page} (relevance: {relevance:.0f}%)"
+            )
             st.caption(result["text"][:300] + ("…" if len(result["text"]) > 300 else ""))
 
             pdf_path = KNOWLEDGE_BASE_DIR / source
@@ -994,7 +1452,7 @@ def render_sources(search_results: list):
                 proc = get_pdf_processor()
                 img_path = proc.extract_page_as_image(pdf_path, page)
                 if img_path and Path(img_path).exists():
-                    st.image(img_path, caption=f"{source} — Page {page}", width="stretch")
+                    st.image(img_path, caption=f"{safe_source} — Page {page}", use_container_width=True)
             if i < len(search_results) - 1:
                 st.divider()
 
@@ -1006,24 +1464,54 @@ def render_welcome():
     <div style="text-align:center; padding:2rem 1rem;">
         <h2 style="color:var(--tan-light); font-family:'JetBrains Mono',monospace;">Welcome, Mechanic</h2>
         <p style="color:var(--steel); max-width:600px; margin:0 auto; line-height:1.7;">
-            I'm your locally-powered HMMWV technical assistant running on Ollama.
+            I'm your locally-powered HMMWV technical assistant.
             I can help with maintenance procedures, troubleshooting, parts identification,
             torque specs, and step-by-step repair instructions — all referenced from official TMs.
-            No internet or cloud API required.
         </p>
     </div>""", unsafe_allow_html=True)
 
-    ollama_ok = AIEngine.check_ollama(st.session_state.ollama_url)
+    provider = st.session_state.provider
+    if provider == PROVIDER_OLLAMA:
+        provider_ok = AIEngine.check_ollama(st.session_state.ollama_url)
+        provider_step = (
+            f"Connected to `{st.session_state.ollama_model}`!"
+            if provider_ok
+            else "Start Ollama: `ollama serve` then `ollama pull gpt-oss:latest`"
+        )
+    elif provider == PROVIDER_OPENAI:
+        provider_ok = bool(st.session_state.openai_url)
+        provider_step = (
+            f"OpenAI-compatible: `{st.session_state.openai_model}` at `{st.session_state.openai_url}`"
+            if provider_ok
+            else "Enter your API Base URL in the sidebar."
+        )
+    elif provider == PROVIDER_ANTHROPIC:
+        provider_ok = bool(st.session_state.anthropic_api_key)
+        provider_step = (
+            f"Anthropic Claude: `{st.session_state.anthropic_model}` configured."
+            if provider_ok
+            else "Enter your Anthropic API key in the sidebar."
+        )
+    else:
+        provider_ok = False
+        provider_step = "Select a provider in the sidebar."
+
     has_data = get_vector_store().get_stats()["total_chunks"] > 0
     st.markdown("---")
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.markdown(f"### {'✅' if ollama_ok else '⬜'} Step 1: Ollama\n{'Connected to `' + st.session_state.ollama_model + '`!' if ollama_ok else 'Start Ollama: `ollama serve` then `ollama pull llama3.1`'}")
+        st.markdown(f"### {'✅' if provider_ok else '⬜'} Step 1: AI Provider\n{provider_step}")
     with c2:
-        st.markdown(f"### {'✅' if has_data else '⬜'} Step 2: Upload TMs\n{'Knowledge base loaded!' if has_data else 'Upload HMMWV Technical Manual PDFs in the sidebar.'}")
+        st.markdown(
+            f"### {'✅' if has_data else '⬜'} Step 2: Upload TMs\n"
+            f"{'Knowledge base loaded!' if has_data else 'Upload HMMWV Technical Manual PDFs in the sidebar.'}"
+        )
     with c3:
-        st.markdown(f"### {'✅' if ollama_ok and has_data else '⬜'} Step 3: Ask Away\n{'Ready for queries!' if ollama_ok and has_data else 'Complete steps 1-2 first.'}")
-    if ollama_ok and has_data:
+        st.markdown(
+            f"### {'✅' if provider_ok and has_data else '⬜'} Step 3: Ask Away\n"
+            f"{'Ready for queries!' if provider_ok and has_data else 'Complete steps 1-2 first.'}"
+        )
+    if provider_ok and has_data:
         st.markdown("---")
         st.markdown("### 🚀 Try a quick action below to get started:")
 
@@ -1033,11 +1521,9 @@ def render_welcome():
 def render_print_button(content: str, msg_index: int, sources: list = None):
     """Render a 🖨️ Print button that opens a print-friendly window with embedded page images."""
     import base64
-    import html as html_mod
 
     proc = get_pdf_processor()
 
-    # Build source references HTML with embedded images
     source_html = ""
     if sources:
         source_html = '<hr><h3 style="page-break-before:auto;">📑 Source References</h3>'
@@ -1047,16 +1533,16 @@ def render_print_button(content: str, msg_index: int, sources: list = None):
             dist = s.get("distance", 0)
             rel = max(0, (1 - dist)) * 100
             text_preview = html_mod.escape(s.get("text", "")[:400])
+            safe_src = html_mod.escape(str(src))
 
             source_html += (
                 f'<div style="border:1px solid #ccc;border-radius:6px;padding:12px;margin:12px 0;'
                 f'page-break-inside:avoid;">'
-                f'<strong>Ref {i}</strong> — <code>{html_mod.escape(src)}</code> page {pg} '
+                f'<strong>Ref {i}</strong> — <code>{safe_src}</code> page {pg} '
                 f'(relevance: {rel:.0f}%)<br>'
                 f'<small style="color:#666;">{text_preview}…</small>'
             )
 
-            # Try to embed the page image as base64
             if isinstance(pg, int):
                 pdf_path = KNOWLEDGE_BASE_DIR / src
                 if pdf_path.exists():
@@ -1069,20 +1555,19 @@ def render_print_button(content: str, msg_index: int, sources: list = None):
                                 f'<div style="margin-top:10px;text-align:center;">'
                                 f'<img src="data:image/png;base64,{img_b64}" '
                                 f'style="max-width:100%;border:1px solid #ddd;border-radius:4px;" '
-                                f'alt="{html_mod.escape(src)} page {pg}"/>'
+                                f'alt="{safe_src} page {pg}"/>'
                                 f'<div style="font-size:11px;color:#888;margin-top:4px;">'
-                                f'{html_mod.escape(src)} — Page {pg}</div>'
+                                f'{safe_src} — Page {pg}</div>'
                                 f'</div>'
                             )
                         except Exception:
-                            pass  # Skip image if read fails
+                            pass
 
             source_html += '</div>'
 
-    variant = st.session_state.get("vehicle_variant", "") or "Any Variant"
+    variant = html_mod.escape(st.session_state.get("vehicle_variant", "") or "Any Variant")
     timestamp = time.strftime("%Y-%m-%d %H:%M")
 
-    # Encode markdown as base64 to avoid JS escaping issues
     md_b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
     src_b64 = base64.b64encode(source_html.encode("utf-8")).decode("ascii")
 
@@ -1121,7 +1606,7 @@ def render_print_button(content: str, msg_index: int, sources: list = None):
         doc.write('@media print{{.noprint{{display:none}} img{{max-width:100%;page-break-inside:avoid}} div{{page-break-inside:avoid}}}}');
         doc.write('</style></head><body>');
         doc.write('<div class="hdr"><h1>🔧 HMMWV Technical Assistant</h1>');
-        doc.write('<div class="meta">Vehicle: {html_mod.escape(variant)} &nbsp;|&nbsp; {timestamp}</div></div>');
+        doc.write('<div class="meta">Vehicle: {variant} &nbsp;|&nbsp; {timestamp}</div></div>');
         doc.write('<div id="c"></div><div id="s"></div>');
         doc.write('<br><button class="noprint" onclick="window.print()" style="padding:10px 24px;font-size:14px;cursor:pointer;background:#4B5320;color:white;border:none;border-radius:6px">🖨️ Print</button>');
         doc.write('</body></html>');
@@ -1139,6 +1624,31 @@ def render_print_button(content: str, msg_index: int, sources: list = None):
 
 
 # ── Chat ───────────────────────────────────────────────────────────────────
+
+def _stream_response(placeholder, ai: AIEngine, user_input: str,
+                     search_results: list, history: list) -> str:
+    """Stream tokens from whichever mode is active; returns full response."""
+    full = ""
+    if st.session_state.mode == "diagnose":
+        gen = ai.diagnose(
+            user_input,
+            search_results,
+            vehicle_variant=st.session_state.vehicle_variant,
+        )
+    else:
+        gen = ai.chat_stream(
+            user_input,
+            search_results,
+            conversation_history=history,
+            vehicle_variant=st.session_state.vehicle_variant,
+            maintenance_category=st.session_state.maintenance_category,
+        )
+    for chunk in gen:
+        full += chunk
+        placeholder.markdown(full + "▌")
+    placeholder.markdown(full)
+    return full
+
 
 def render_chat():
     for idx, msg in enumerate(st.session_state.messages):
@@ -1166,28 +1676,22 @@ def render_chat():
 
         vs = get_vector_store()
         search_results = vs.search(user_input, n_results=TOP_K_RESULTS)
-
-        history = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages[:-1][-12:]]
+        history = [
+            {"role": m["role"], "content": m["content"]}
+            for m in st.session_state.messages[:-1][-12:]
+        ]
         ai = get_ai_engine()
 
         with st.chat_message("assistant", avatar="🔧"):
-            if st.session_state.mode == "diagnose":
-                with st.spinner("Analyzing symptoms…"):
-                    response = ai.diagnose(user_input, search_results, vehicle_variant=st.session_state.vehicle_variant)
-                st.markdown(response)
-            else:
-                placeholder = st.empty()
-                full = ""
-                for chunk in ai.chat_stream(user_input, search_results, conversation_history=history,
-                                            vehicle_variant=st.session_state.vehicle_variant,
-                                            maintenance_category=st.session_state.maintenance_category):
-                    full += chunk
-                    placeholder.markdown(full + "▌")
-                placeholder.markdown(full)
-                response = full
+            placeholder = st.empty()
+            response = _stream_response(placeholder, ai, user_input, search_results, history)
             render_sources(search_results)
 
-        st.session_state.messages.append({"role": "assistant", "content": response, "sources": search_results})
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": response,
+            "sources": search_results,
+        })
 
 
 # ── Main ───────────────────────────────────────────────────────────────────
@@ -1198,6 +1702,7 @@ def main():
     if not st.session_state.messages:
         render_welcome()
     render_chat()
+
 
 if __name__ == "__main__":
     main()
