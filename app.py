@@ -11,6 +11,7 @@ Usage:
     streamlit run app.py
 """
 
+import base64
 import hashlib
 import html as html_mod
 import json
@@ -25,6 +26,7 @@ from pathlib import Path
 from typing import Generator, Optional
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CONFIGURATION
@@ -39,30 +41,24 @@ SETTINGS_FILE = BASE_DIR / ".hmmwv_settings.json"
 for d in [KNOWLEDGE_BASE_DIR, EXTRACTED_IMAGES_DIR, CHROMA_PERSIST_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
-# ── Provider defaults ──────────────────────────────────────────────────────
-OLLAMA_DEFAULT_URL = "http://localhost:11434"
+OLLAMA_DEFAULT_URL   = "http://localhost:11434"
 OLLAMA_DEFAULT_MODEL = "gpt-oss:latest"
-
-OPENAI_DEFAULT_URL = "https://api.openai.com/v1"
+OPENAI_DEFAULT_URL   = "https://api.openai.com/v1"
 OPENAI_DEFAULT_MODEL = "gpt-4o"
-
 ANTHROPIC_DEFAULT_MODEL = "claude-opus-4-6"
 
-# Provider identifiers
-PROVIDER_OLLAMA = "Ollama (Local)"
-PROVIDER_OPENAI = "OpenAI-Compatible"
+PROVIDER_OLLAMA    = "Ollama (Local)"
+PROVIDER_OPENAI    = "OpenAI-Compatible"
 PROVIDER_ANTHROPIC = "Anthropic (Claude)"
+ALL_PROVIDERS      = [PROVIDER_OLLAMA, PROVIDER_OPENAI, PROVIDER_ANTHROPIC]
 
-ALL_PROVIDERS = [PROVIDER_OLLAMA, PROVIDER_OPENAI, PROVIDER_ANTHROPIC]
-
-# ── RAG / chunking constants ───────────────────────────────────────────────
-MAX_TOKENS = 4096
-TEMPERATURE = 0.2
-CHUNK_SIZE = 1000
+MAX_TOKENS    = 4096
+TEMPERATURE   = 0.2
+CHUNK_SIZE    = 1000
 CHUNK_OVERLAP = 200
 TOP_K_RESULTS = 8
 COLLECTION_NAME = "hmmwv_manuals"
-MIN_IMAGE_SIZE = (100, 100)
+MIN_IMAGE_SIZE  = (100, 100)
 
 HMMWV_VARIANTS = [
     "M998 — Cargo/Troop Carrier",
@@ -136,7 +132,6 @@ content to answer technical questions. The retrieved context chunks are provided
 with each query.
 """
 
-# ── Logging ────────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -157,9 +152,7 @@ def _default_settings() -> dict:
         "anthropic_model": ANTHROPIC_DEFAULT_MODEL,
     }
 
-
 def load_settings() -> dict:
-    """Load persisted settings from disk, merging with defaults."""
     defaults = _default_settings()
     if SETTINGS_FILE.exists():
         try:
@@ -169,9 +162,7 @@ def load_settings() -> dict:
             pass
     return defaults
 
-
 def save_settings(settings: dict):
-    """Persist settings to disk (API keys are stored; users accept that risk)."""
     try:
         SETTINGS_FILE.write_text(json.dumps(settings, indent=2), encoding="utf-8")
     except Exception as e:
@@ -183,13 +174,11 @@ def save_settings(settings: dict):
 # ═══════════════════════════════════════════════════════════════════════════
 
 class PDFProcessor:
-    """Processes HMMWV technical manual PDFs into searchable chunks and images."""
-
     def __init__(self):
         self.knowledge_dir = KNOWLEDGE_BASE_DIR
-        self.image_dir = EXTRACTED_IMAGES_DIR
+        self.image_dir     = EXTRACTED_IMAGES_DIR
         self._manifest_path = self.knowledge_dir / ".processed_manifest.json"
-        self._manifest = self._load_manifest()
+        self._manifest      = self._load_manifest()
 
     def _load_manifest(self) -> dict:
         if self._manifest_path.exists():
@@ -219,26 +208,16 @@ class PDFProcessor:
     def _clean_text(self, text: str) -> str:
         text = re.sub(r"[ \t]+", " ", text)
         text = re.sub(r"\n{3,}", "\n\n", text)
-        # Fix common UTF-8 mojibake from PDF extraction
         mojibake_map = {
-            "\u00e2\u0080\u0094": "\u2014",  # em dash
-            "\u00e2\u0080\u0093": "\u2013",  # en dash
-            "\u00e2\u0080\u0099": "\u2019",  # right single quote
-            "\u00e2\u0080\u0098": "\u2018",  # left single quote
-            "\u00e2\u0080\u009c": "\u201c",  # left double quote
-            "\u00e2\u0080\u009d": "\u201d",  # right double quote
-            "\u00e2\u0080\u00a2": "\u2022",  # bullet
-            "\u00e2\u0080\u00a6": "\u2026",  # ellipsis
-            "\u00e2\u0080\u008b": "",         # zero-width space
-            "\u00c2\u00bd": "\u00bd",         # 1/2
-            "\u00c2\u00bc": "\u00bc",         # 1/4
-            "\u00c2\u00be": "\u00be",         # 3/4
-            "\u00c2\u00b0": "\u00b0",         # degree
-            "\u00c2\u00b1": "\u00b1",         # plus-minus
-            "\u00c2\u00ae": "\u00ae",         # registered
-            "\u00c2\u00a9": "\u00a9",         # copyright
-            "\u00ef\u00ac\u0081": "fi",       # fi ligature
-            "\u00ef\u00ac\u0082": "fl",       # fl ligature
+            "\u00e2\u0080\u0094": "\u2014", "\u00e2\u0080\u0093": "\u2013",
+            "\u00e2\u0080\u0099": "\u2019", "\u00e2\u0080\u0098": "\u2018",
+            "\u00e2\u0080\u009c": "\u201c", "\u00e2\u0080\u009d": "\u201d",
+            "\u00e2\u0080\u00a2": "\u2022", "\u00e2\u0080\u00a6": "\u2026",
+            "\u00e2\u0080\u008b": "",        "\u00c2\u00bd": "\u00bd",
+            "\u00c2\u00bc": "\u00bc",        "\u00c2\u00be": "\u00be",
+            "\u00c2\u00b0": "\u00b0",        "\u00c2\u00b1": "\u00b1",
+            "\u00c2\u00ae": "\u00ae",        "\u00c2\u00a9": "\u00a9",
+            "\u00ef\u00ac\u0081": "fi",      "\u00ef\u00ac\u0082": "fl",
         }
         for bad, good in mojibake_map.items():
             text = text.replace(bad, good)
@@ -247,14 +226,12 @@ class PDFProcessor:
 
     def extract_text_from_pdf(self, pdf_path: Path) -> list:
         import pdfplumber
-
         documents = []
         try:
             with pdfplumber.open(pdf_path) as pdf:
                 total_pages = len(pdf.pages)
                 for page_num, page in enumerate(pdf.pages, start=1):
-                    text = page.extract_text() or ""
-                    text = self._clean_text(text)
+                    text = self._clean_text(page.extract_text() or "")
                     if text.strip():
                         documents.append({
                             "text": text,
@@ -264,154 +241,103 @@ class PDFProcessor:
                                 "total_pages": total_pages,
                             },
                         })
-            logger.info(f"Extracted text from {len(documents)} pages in {pdf_path.name}")
         except Exception as e:
             logger.error(f"Error extracting text from {pdf_path.name}: {e}")
         return documents
 
-    def _split_long_paragraph(self, para: str) -> list[str]:
-        """Split a paragraph that exceeds CHUNK_SIZE on sentence boundaries."""
+    def _split_long_paragraph(self, para: str) -> list:
         if len(para) <= CHUNK_SIZE:
             return [para]
-        # Split on sentence-ending punctuation followed by whitespace
         sentences = re.split(r"(?<=[.!?])\s+", para)
-        parts = []
-        current = ""
-        for sentence in sentences:
-            if len(current) + len(sentence) + 1 > CHUNK_SIZE and current:
+        parts, current = [], ""
+        for s in sentences:
+            if len(current) + len(s) + 1 > CHUNK_SIZE and current:
                 parts.append(current.strip())
-                current = sentence
+                current = s
             else:
-                current = current + " " + sentence if current else sentence
+                current = current + " " + s if current else s
         if current.strip():
             parts.append(current.strip())
-        return parts if parts else [para]
+        return parts or [para]
 
     def chunk_documents(self, documents: list) -> list:
-        """
-        Split page-level documents into overlapping chunks.
-        Handles paragraphs longer than CHUNK_SIZE by further splitting on
-        sentence boundaries. Fixes total_chunks to only backfill within
-        the current document's chunks.
-        """
         all_chunks = []
         for doc in documents:
-            text = doc["text"]
-            meta = doc["metadata"]
+            text, meta = doc["text"], doc["metadata"]
             doc_chunks = []
-
             if len(text) <= CHUNK_SIZE:
-                doc_chunks.append({
-                    "text": text,
-                    "metadata": {**meta, "chunk_index": 0, "total_chunks": 1},
-                })
+                doc_chunks.append({"text": text, "metadata": {**meta, "chunk_index": 0, "total_chunks": 1}})
             else:
-                # Split on paragraph boundaries; further split long paragraphs
-                raw_paragraphs = text.split("\n\n")
-                paragraphs: list[str] = []
-                for para in raw_paragraphs:
-                    paragraphs.extend(self._split_long_paragraph(para))
-
-                current_chunk = ""
-                chunk_idx = 0
-
+                paragraphs = []
+                for p in text.split("\n\n"):
+                    paragraphs.extend(self._split_long_paragraph(p))
+                current_chunk, chunk_idx = "", 0
                 for para in paragraphs:
                     if len(current_chunk) + len(para) + 2 > CHUNK_SIZE and current_chunk:
-                        doc_chunks.append({
-                            "text": current_chunk.strip(),
-                            "metadata": {**meta, "chunk_index": chunk_idx},
-                        })
-                        overlap_text = (
-                            current_chunk[-CHUNK_OVERLAP:]
-                            if len(current_chunk) > CHUNK_OVERLAP
-                            else current_chunk
-                        )
-                        current_chunk = overlap_text + "\n\n" + para
+                        doc_chunks.append({"text": current_chunk.strip(), "metadata": {**meta, "chunk_index": chunk_idx}})
+                        overlap = current_chunk[-CHUNK_OVERLAP:] if len(current_chunk) > CHUNK_OVERLAP else current_chunk
+                        current_chunk = overlap + "\n\n" + para
                         chunk_idx += 1
                     else:
                         current_chunk = current_chunk + "\n\n" + para if current_chunk else para
-
                 if current_chunk.strip():
-                    doc_chunks.append({
-                        "text": current_chunk.strip(),
-                        "metadata": {**meta, "chunk_index": chunk_idx},
-                    })
-
-                # Backfill total_chunks only for this document's chunks
+                    doc_chunks.append({"text": current_chunk.strip(), "metadata": {**meta, "chunk_index": chunk_idx}})
                 total = chunk_idx + 1
                 for c in doc_chunks:
                     if c["metadata"].get("total_chunks") is None:
                         c["metadata"]["total_chunks"] = total
-
             all_chunks.extend(doc_chunks)
-
-        logger.info(f"Created {len(all_chunks)} chunks from {len(documents)} documents")
         return all_chunks
 
     def extract_images_from_pdf(self, pdf_path: Path) -> list:
         import pdfplumber
-
         extracted = []
         pdf_stem = pdf_path.stem
         pdf_image_dir = self.image_dir / pdf_stem
         pdf_image_dir.mkdir(parents=True, exist_ok=True)
-
         try:
             with pdfplumber.open(pdf_path) as pdf:
                 for page_num, page in enumerate(pdf.pages, start=1):
-                    page_images = page.images if hasattr(page, "images") else []
-                    for img_idx, img in enumerate(page_images):
+                    for img_idx, img in enumerate(getattr(page, "images", [])):
                         try:
                             bbox = (img["x0"], img["top"], img["x1"], img["bottom"])
-                            width = int(img["x1"] - img["x0"])
-                            height = int(img["bottom"] - img["top"])
-                            if width < MIN_IMAGE_SIZE[0] or height < MIN_IMAGE_SIZE[1]:
+                            w, h = int(img["x1"]-img["x0"]), int(img["bottom"]-img["top"])
+                            if w < MIN_IMAGE_SIZE[0] or h < MIN_IMAGE_SIZE[1]:
                                 continue
-                            cropped = page.crop(bbox)
-                            pil_img = cropped.to_image(resolution=200).original
-                            img_filename = f"{pdf_stem}_p{page_num:04d}_img{img_idx:03d}.png"
-                            img_path = pdf_image_dir / img_filename
+                            pil_img = page.crop(bbox).to_image(resolution=200).original
+                            fname = f"{pdf_stem}_p{page_num:04d}_img{img_idx:03d}.png"
+                            img_path = pdf_image_dir / fname
                             pil_img.save(str(img_path))
-                            extracted.append({
-                                "image_path": str(img_path),
-                                "source_file": pdf_path.name,
-                                "page_number": page_num,
-                                "width": width,
-                                "height": height,
-                            })
+                            extracted.append({"image_path": str(img_path), "source_file": pdf_path.name,
+                                              "page_number": page_num, "width": w, "height": h})
                         except Exception:
                             continue
         except Exception as e:
             logger.error(f"Error extracting images from {pdf_path.name}: {e}")
-        logger.info(f"Extracted {len(extracted)} images from {pdf_path.name}")
         return extracted
 
     def extract_page_as_image(self, pdf_path: Path, page_number: int) -> Optional[str]:
         import pdfplumber
-
         pdf_stem = pdf_path.stem
-        page_image_dir = self.image_dir / pdf_stem / "pages"
-        page_image_dir.mkdir(parents=True, exist_ok=True)
-        output_path = page_image_dir / f"page_{page_number:04d}.png"
-        if output_path.exists():
-            return str(output_path)
+        out_dir = self.image_dir / pdf_stem / "pages"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"page_{page_number:04d}.png"
+        if out_path.exists():
+            return str(out_path)
         try:
             with pdfplumber.open(pdf_path) as pdf:
                 if page_number < 1 or page_number > len(pdf.pages):
                     return None
-                page = pdf.pages[page_number - 1]
-                img = page.to_image(resolution=200)
-                img.save(str(output_path))
-                return str(output_path)
+                pdf.pages[page_number - 1].to_image(resolution=200).save(str(out_path))
+                return str(out_path)
         except Exception as e:
             logger.error(f"Error rendering page {page_number} of {pdf_path.name}: {e}")
             return None
 
     def process_pdf(self, pdf_path: Path) -> dict:
-        logger.info(f"Processing: {pdf_path.name}")
         documents = self.extract_text_from_pdf(pdf_path)
-        chunks = self.chunk_documents(documents)
-        images = self.extract_images_from_pdf(pdf_path)
+        chunks    = self.chunk_documents(documents)
+        images    = self.extract_images_from_pdf(pdf_path)
         self._manifest[pdf_path.name] = {
             "hash": self._file_hash(pdf_path),
             "num_chunks": len(chunks),
@@ -424,17 +350,12 @@ class PDFProcessor:
     def process_all_pdfs(self, force: bool = False) -> dict:
         pdfs = self.discover_pdfs() if force else self.get_unprocessed_pdfs()
         all_chunks, all_images = [], []
-        for pdf_path in pdfs:
-            result = self.process_pdf(pdf_path)
-            all_chunks.extend(result["chunks"])
-            all_images.extend(result["images"])
-        return {
-            "total_pdfs": len(pdfs),
-            "total_chunks": len(all_chunks),
-            "total_images": len(all_images),
-            "chunks": all_chunks,
-            "images": all_images,
-        }
+        for p in pdfs:
+            r = self.process_pdf(p)
+            all_chunks.extend(r["chunks"])
+            all_images.extend(r["images"])
+        return {"total_pdfs": len(pdfs), "total_chunks": len(all_chunks),
+                "total_images": len(all_images), "chunks": all_chunks, "images": all_images}
 
     def get_processing_status(self) -> dict:
         all_pdfs = self.discover_pdfs()
@@ -443,49 +364,35 @@ class PDFProcessor:
             "processed": len(self._manifest),
             "unprocessed": len(self.get_unprocessed_pdfs()),
             "details": {
-                pdf.name: {
-                    "processed": pdf.name in self._manifest,
-                    **(self._manifest.get(pdf.name, {})),
-                }
+                pdf.name: {"processed": pdf.name in self._manifest, **(self._manifest.get(pdf.name, {}))}
                 for pdf in all_pdfs
             },
         }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# VECTOR STORE  (Pure-Python TF-IDF — no ChromaDB, no Pydantic)
+# VECTOR STORE
 # ═══════════════════════════════════════════════════════════════════════════
 
 class VectorStore:
-    """
-    Lightweight TF-IDF vector store with cosine similarity.
-    Persisted as JSON — works on every Python version, zero heavy deps.
-    """
-
     _STORE_FILE = "vector_store.json"
 
     def __init__(self):
-        self._documents: list[str] = []
-        self._metadatas: list[dict] = []
-        self._ids: list[str] = []
-        # TF-IDF state
-        self._vocab: dict[str, int] = {}
-        self._idf: list[float] = []
-        self._tfidf_matrix: list[list[float]] = []
+        self._documents: list = []
+        self._metadatas: list = []
+        self._ids: list = []
+        self._vocab: dict = {}
+        self._idf: list = []
+        self._tfidf_matrix: list = []
         self._initialized = False
-
-    # ── Persistence ────────────────────────────────────────────────────────
 
     def _store_path(self) -> Path:
         return CHROMA_PERSIST_DIR / self._STORE_FILE
 
     def _save(self):
-        data = {
-            "documents": self._documents,
-            "metadatas": self._metadatas,
-            "ids": self._ids,
-        }
-        self._store_path().write_text(json.dumps(data))
+        self._store_path().write_text(json.dumps(
+            {"documents": self._documents, "metadatas": self._metadatas, "ids": self._ids}
+        ))
 
     def _load(self):
         p = self._store_path()
@@ -493,47 +400,28 @@ class VectorStore:
             data = json.loads(p.read_text())
             self._documents = data.get("documents", [])
             self._metadatas = data.get("metadatas", [])
-            self._ids = data.get("ids", [])
-
-    # ── Tokeniser ─────────────────────────────────────────────────────────
+            self._ids       = data.get("ids", [])
 
     @staticmethod
-    def _tokenize(text: str) -> list[str]:
-        """Lowercase, split on non-alphanumeric, keep numbers (part numbers!)."""
+    def _tokenize(text: str) -> list:
         return re.findall(r"[a-z0-9]{2,}", text.lower())
 
-    # ── TF-IDF Build ──────────────────────────────────────────────────────
-
     def _build_index(self):
-        """Rebuild TF-IDF matrix from current documents."""
         if not self._documents:
             self._vocab, self._idf, self._tfidf_matrix = {}, [], []
             return
-
         doc_tokens = [self._tokenize(d) for d in self._documents]
         n_docs = len(doc_tokens)
-
         df: Counter = Counter()
         for tokens in doc_tokens:
             df.update(set(tokens))
-
         max_df = max(1, int(n_docs * 0.95))
-        self._vocab = {}
-        idx = 0
-        for term, freq in df.most_common():
-            if freq <= max_df:
-                self._vocab[term] = idx
-                idx += 1
-
+        self._vocab = {term: idx for idx, (term, freq) in enumerate(df.most_common()) if freq <= max_df}
         vocab_size = len(self._vocab)
-
-        self._idf = [0.0] * vocab_size
-        for term, i in self._vocab.items():
-            self._idf[i] = math.log(n_docs / (df[term] + 1)) + 1.0
-
+        self._idf = [math.log(n_docs / (df[term] + 1)) + 1.0 for term in self._vocab]
         self._tfidf_matrix = []
         for tokens in doc_tokens:
-            tf = Counter(tokens)
+            tf  = Counter(tokens)
             vec = [0.0] * vocab_size
             for term, count in tf.items():
                 if term in self._vocab:
@@ -542,46 +430,37 @@ class VectorStore:
             norm = math.sqrt(sum(v * v for v in vec)) or 1.0
             self._tfidf_matrix.append([v / norm for v in vec])
 
-    # ── Public API ────────────────────────────────────────────────────────
-
     def initialize(self):
         self._load()
         self._build_index()
         self._initialized = True
-        count = len(self._documents)
-        logger.info(f"Vector store initialized — {count} documents")
-        return count
+        return len(self._documents)
 
     def add_chunks(self, chunks: list) -> int:
-        if not chunks:
-            return 0
-        existing_ids = set(self._ids)
+        existing = set(self._ids)
         added = 0
         for i, chunk in enumerate(chunks):
-            source = chunk["metadata"].get("source_file", "unknown")
-            page = chunk["metadata"].get("page_number", 0)
-            chunk_idx = chunk["metadata"].get("chunk_index", i)
-            doc_id = f"{source}__p{page}__c{chunk_idx}"
-            if doc_id in existing_ids:
+            src   = chunk["metadata"].get("source_file", "unknown")
+            page  = chunk["metadata"].get("page_number", 0)
+            cidx  = chunk["metadata"].get("chunk_index", i)
+            doc_id = f"{src}__p{page}__c{cidx}"
+            if doc_id in existing:
                 continue
             self._ids.append(doc_id)
             self._documents.append(chunk["text"])
-            flat = {}
-            for k, v in chunk["metadata"].items():
-                flat[k] = v if isinstance(v, (str, int, float, bool)) else str(v)
-            self._metadatas.append(flat)
+            self._metadatas.append({
+                k: v if isinstance(v, (str, int, float, bool)) else str(v)
+                for k, v in chunk["metadata"].items()
+            })
             added += 1
-
         if added > 0:
             self._save()
             self._build_index()
-        logger.info(f"Added {added} chunks (total: {len(self._documents)})")
         return added
 
     def search(self, query: str, n_results: int = TOP_K_RESULTS, where: dict = None) -> list:
         if not self._documents:
             return []
-
         tokens = self._tokenize(query)
         tf = Counter(tokens)
         vocab_size = len(self._vocab)
@@ -591,39 +470,22 @@ class VectorStore:
                 i = self._vocab[term]
                 q_vec[i] = (1 + math.log(count)) * self._idf[i]
         q_norm = math.sqrt(sum(v * v for v in q_vec)) or 1.0
-        q_vec = [v / q_norm for v in q_vec]
-
+        q_vec  = [v / q_norm for v in q_vec]
         scores = []
         for idx, doc_vec in enumerate(self._tfidf_matrix):
-            if where:
-                meta = self._metadatas[idx]
-                if not all(meta.get(k) == v for k, v in where.items()):
-                    continue
-            sim = sum(q * d for q, d in zip(q_vec, doc_vec))
-            scores.append((idx, sim))
-
+            if where and not all(self._metadatas[idx].get(k) == v for k, v in where.items()):
+                continue
+            scores.append((idx, sum(q * d for q, d in zip(q_vec, doc_vec))))
         scores.sort(key=lambda x: x[1], reverse=True)
-
-        results = []
-        for idx, sim in scores[:n_results]:
-            results.append({
-                "text": self._documents[idx],
-                "metadata": self._metadatas[idx],
-                "distance": 1.0 - sim,
-                "id": self._ids[idx],
-            })
-        return results
+        return [
+            {"text": self._documents[i], "metadata": self._metadatas[i],
+             "distance": 1.0 - sim, "id": self._ids[i]}
+            for i, sim in scores[:n_results]
+        ]
 
     def get_stats(self) -> dict:
-        sources = set()
-        for meta in self._metadatas:
-            if "source_file" in meta:
-                sources.add(meta["source_file"])
-        return {
-            "total_chunks": len(self._documents),
-            "source_files": sorted(sources),
-            "num_sources": len(sources),
-        }
+        sources = {m["source_file"] for m in self._metadatas if "source_file" in m}
+        return {"total_chunks": len(self._documents), "source_files": sorted(sources), "num_sources": len(sources)}
 
     def clear(self):
         self._documents, self._metadatas, self._ids = [], [], []
@@ -631,304 +493,173 @@ class VectorStore:
         p = self._store_path()
         if p.exists():
             p.unlink()
-        logger.info("Vector store cleared")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# AI ENGINE  — multi-provider (Ollama, OpenAI-compatible, Anthropic)
+# AI ENGINE
 # ═══════════════════════════════════════════════════════════════════════════
 
 class AIEngine:
-    """
-    Multi-provider AI engine supporting:
-      - Ollama  (local, no key needed)
-      - OpenAI-compatible REST API  (OpenAI, Together, Groq, local vLLM, etc.)
-      - Anthropic Claude API
-    """
-
     def __init__(self, provider: str, **kwargs):
-        """
-        provider: one of PROVIDER_OLLAMA, PROVIDER_OPENAI, PROVIDER_ANTHROPIC
-        kwargs:
-          Ollama:    base_url, model
-          OpenAI:    base_url, model, api_key
-          Anthropic: api_key, model
-        """
         self.provider = provider
-        self._cfg = kwargs
-
-    # ── Ollama helpers ─────────────────────────────────────────────────────
+        self._cfg     = kwargs
 
     @staticmethod
     def check_ollama(base_url: str = OLLAMA_DEFAULT_URL) -> bool:
         try:
-            req = urllib.request.Request(f"{base_url}/api/tags", method="GET")
-            with urllib.request.urlopen(req, timeout=3):
+            with urllib.request.urlopen(
+                urllib.request.Request(f"{base_url}/api/tags"), timeout=3
+            ):
                 return True
         except Exception:
             return False
 
     @staticmethod
-    def list_ollama_models(base_url: str = OLLAMA_DEFAULT_URL) -> list[str]:
+    def list_ollama_models(base_url: str = OLLAMA_DEFAULT_URL) -> list:
         try:
-            req = urllib.request.Request(f"{base_url}/api/tags", method="GET")
-            with urllib.request.urlopen(req, timeout=5) as resp:
-                data = json.loads(resp.read().decode())
-                return sorted([m["name"] for m in data.get("models", [])])
+            with urllib.request.urlopen(
+                urllib.request.Request(f"{base_url}/api/tags"), timeout=5
+            ) as resp:
+                return sorted(m["name"] for m in json.loads(resp.read()).get("models", []))
         except Exception:
             return []
 
-    # ── Context / message helpers ──────────────────────────────────────────
-
-    def _format_context(self, search_results: list) -> str:
-        if not search_results:
-            return (
-                "<knowledge_base_context>\n"
-                "No relevant technical manual content was found for this query.\n"
-                "</knowledge_base_context>"
-            )
+    def _format_context(self, results: list) -> str:
+        if not results:
+            return "<knowledge_base_context>\nNo relevant content found.\n</knowledge_base_context>"
         parts = ["<knowledge_base_context>"]
-        for i, result in enumerate(search_results, 1):
-            source = result.get("metadata", {}).get("source_file", "Unknown")
-            page = result.get("metadata", {}).get("page_number", "?")
-            distance = result.get("distance", 0)
-            relevance = max(0, (1 - distance)) * 100
-            parts.append(
-                f"\n--- Reference {i} | Source: {source} | Page: {page} | "
-                f"Relevance: {relevance:.0f}% ---\n{result['text']}\n"
-            )
+        for i, r in enumerate(results, 1):
+            src = r.get("metadata", {}).get("source_file", "Unknown")
+            pg  = r.get("metadata", {}).get("page_number", "?")
+            rel = max(0, 1 - r.get("distance", 0)) * 100
+            parts.append(f"\n--- Ref {i} | {src} | Page {pg} | {rel:.0f}% ---\n{r['text']}\n")
         parts.append("</knowledge_base_context>")
         return "\n".join(parts)
 
     def _build_user_message(self, query, context, vehicle_variant="", maintenance_category=""):
         parts = []
-        if vehicle_variant:
-            parts.append(f"[Vehicle: {vehicle_variant}]")
-        if maintenance_category:
-            parts.append(f"[Category: {maintenance_category}]")
+        if vehicle_variant:      parts.append(f"[Vehicle: {vehicle_variant}]")
+        if maintenance_category: parts.append(f"[Category: {maintenance_category}]")
         parts.append(context)
         parts.append(f"\n## Mechanic's Question\n{query}")
         return "\n".join(parts)
 
-    # ── Ollama streaming ───────────────────────────────────────────────────
-
-    def _stream_ollama(self, messages: list) -> Generator[str, None, None]:
-        base_url = self._cfg.get("base_url", OLLAMA_DEFAULT_URL).rstrip("/")
+    def _stream_ollama(self, messages: list) -> Generator:
+        url   = self._cfg.get("base_url", OLLAMA_DEFAULT_URL).rstrip("/")
         model = self._cfg.get("model", OLLAMA_DEFAULT_MODEL)
-        payload = json.dumps({
-            "model": model,
-            "messages": messages,
-            "stream": True,
-            "options": {
-                "temperature": TEMPERATURE,
-                "num_predict": MAX_TOKENS,
-            },
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            f"{base_url}/api/chat",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
+        payload = json.dumps({"model": model, "messages": messages, "stream": True,
+                               "options": {"temperature": TEMPERATURE, "num_predict": MAX_TOKENS}}).encode()
+        req = urllib.request.Request(f"{url}/api/chat", data=payload,
+                                     headers={"Content-Type": "application/json"}, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
                 for line in resp:
                     line = line.strip()
-                    if not line:
-                        continue
+                    if not line: continue
                     try:
-                        chunk = json.loads(line.decode("utf-8"))
+                        chunk = json.loads(line.decode())
                         token = chunk.get("message", {}).get("content", "")
-                        if token:
-                            yield token
-                        if chunk.get("done", False):
-                            break
+                        if token: yield token
+                        if chunk.get("done"): break
                     except json.JSONDecodeError:
                         continue
         except urllib.error.URLError as e:
-            yield (
-                f"❌ **Connection Error**: Cannot reach Ollama at `{base_url}`. "
-                f"Is it running?\n\nError: {e.reason}"
-            )
+            yield f"❌ **Cannot reach Ollama** at `{url}`\n\n{e.reason}"
         except Exception as e:
-            logger.error(f"Ollama stream error: {e}")
             yield f"❌ **Error**: {e}"
 
-    # ── OpenAI-compatible streaming ────────────────────────────────────────
-
-    def _stream_openai(self, messages: list) -> Generator[str, None, None]:
-        base_url = self._cfg.get("base_url", OPENAI_DEFAULT_URL).rstrip("/")
-        model = self._cfg.get("model", OPENAI_DEFAULT_MODEL)
-        api_key = self._cfg.get("api_key", "")
-        payload = json.dumps({
-            "model": model,
-            "messages": messages,
-            "stream": True,
-            "max_tokens": MAX_TOKENS,
-            "temperature": TEMPERATURE,
-        }).encode("utf-8")
+    def _stream_openai(self, messages: list) -> Generator:
+        url    = self._cfg.get("base_url", OPENAI_DEFAULT_URL).rstrip("/")
+        model  = self._cfg.get("model", OPENAI_DEFAULT_MODEL)
+        apikey = self._cfg.get("api_key", "")
+        payload = json.dumps({"model": model, "messages": messages, "stream": True,
+                               "max_tokens": MAX_TOKENS, "temperature": TEMPERATURE}).encode()
         headers = {"Content-Type": "application/json"}
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-        req = urllib.request.Request(
-            f"{base_url}/chat/completions",
-            data=payload,
-            headers=headers,
-            method="POST",
-        )
+        if apikey: headers["Authorization"] = f"Bearer {apikey}"
+        req = urllib.request.Request(f"{url}/chat/completions", data=payload,
+                                     headers=headers, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
                 for line in resp:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    decoded = line.decode("utf-8")
-                    if decoded.startswith("data: "):
-                        decoded = decoded[6:]
-                    if decoded == "[DONE]":
-                        break
+                    decoded = line.strip().decode("utf-8")
+                    if decoded.startswith("data: "): decoded = decoded[6:]
+                    if decoded == "[DONE]": break
+                    if not decoded: continue
                     try:
-                        chunk = json.loads(decoded)
-                        delta = chunk.get("choices", [{}])[0].get("delta", {})
-                        token = delta.get("content", "")
-                        if token:
-                            yield token
+                        token = json.loads(decoded).get("choices", [{}])[0].get("delta", {}).get("content", "")
+                        if token: yield token
                     except json.JSONDecodeError:
                         continue
         except urllib.error.HTTPError as e:
             body = ""
-            try:
-                body = e.read().decode("utf-8")
-            except Exception:
-                pass
+            try: body = e.read().decode()
+            except Exception: pass
             yield f"❌ **API Error {e.code}**: {e.reason}\n\n{body}"
-        except urllib.error.URLError as e:
-            yield f"❌ **Connection Error**: Cannot reach `{base_url}`.\n\nError: {e.reason}"
         except Exception as e:
-            logger.error(f"OpenAI stream error: {e}")
             yield f"❌ **Error**: {e}"
 
-    # ── Anthropic streaming ────────────────────────────────────────────────
-
-    def _stream_anthropic(self, messages: list) -> Generator[str, None, None]:
-        api_key = self._cfg.get("api_key", "")
-        model = self._cfg.get("model", ANTHROPIC_DEFAULT_MODEL)
-        if not api_key:
-            yield "❌ **Error**: Anthropic API key is required. Enter it in the sidebar."
+    def _stream_anthropic(self, messages: list) -> Generator:
+        apikey = self._cfg.get("api_key", "")
+        model  = self._cfg.get("model", ANTHROPIC_DEFAULT_MODEL)
+        if not apikey:
+            yield "❌ **Anthropic API key required.** Enter it in the sidebar."
             return
-        # Anthropic uses a separate system field; strip it from messages if present
-        sys_msg = ""
-        filtered = []
+        sys_msg, filtered = "", []
         for m in messages:
-            if m["role"] == "system":
-                sys_msg = m["content"]
-            else:
-                filtered.append(m)
-        payload = json.dumps({
-            "model": model,
-            "max_tokens": MAX_TOKENS,
-            "temperature": TEMPERATURE,
-            "system": sys_msg or SYSTEM_PROMPT,
-            "messages": filtered,
-            "stream": True,
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages",
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-            },
-            method="POST",
-        )
+            if m["role"] == "system": sys_msg = m["content"]
+            else: filtered.append(m)
+        payload = json.dumps({"model": model, "max_tokens": MAX_TOKENS, "temperature": TEMPERATURE,
+                               "system": sys_msg or SYSTEM_PROMPT, "messages": filtered, "stream": True}).encode()
+        req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=payload,
+            headers={"Content-Type": "application/json", "x-api-key": apikey,
+                     "anthropic-version": "2023-06-01"}, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
                 for line in resp:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    decoded = line.decode("utf-8")
-                    if decoded.startswith("data: "):
-                        decoded = decoded[6:]
+                    decoded = line.strip().decode("utf-8")
+                    if decoded.startswith("data: "): decoded = decoded[6:]
+                    if not decoded: continue
                     try:
                         event = json.loads(decoded)
-                        etype = event.get("type", "")
-                        if etype == "content_block_delta":
-                            delta = event.get("delta", {})
-                            if delta.get("type") == "text_delta":
-                                yield delta.get("text", "")
-                        elif etype == "message_stop":
-                            break
-                        elif etype == "error":
-                            yield f"❌ **Anthropic Error**: {event.get('error', {}).get('message', 'Unknown error')}"
+                        if event.get("type") == "content_block_delta":
+                            text = event.get("delta", {}).get("text", "")
+                            if text: yield text
+                        elif event.get("type") in ("message_stop", "error"):
+                            if event.get("type") == "error":
+                                yield f"❌ {event.get('error', {}).get('message', 'Error')}"
                             break
                     except json.JSONDecodeError:
                         continue
         except urllib.error.HTTPError as e:
             body = ""
-            try:
-                body = e.read().decode("utf-8")
-            except Exception:
-                pass
+            try: body = e.read().decode()
+            except Exception: pass
             yield f"❌ **API Error {e.code}**: {e.reason}\n\n{body}"
-        except urllib.error.URLError as e:
-            yield f"❌ **Connection Error**: Cannot reach Anthropic API.\n\nError: {e.reason}"
         except Exception as e:
-            logger.error(f"Anthropic stream error: {e}")
             yield f"❌ **Error**: {e}"
 
-    # ── Public streaming interface ─────────────────────────────────────────
-
-    def chat_stream(
-        self,
-        query: str,
-        search_results: list,
-        conversation_history: list = None,
-        vehicle_variant: str = "",
-        maintenance_category: str = "",
-    ) -> Generator[str, None, None]:
+    def chat_stream(self, query, search_results, conversation_history=None,
+                    vehicle_variant="", maintenance_category="") -> Generator:
         context = self._format_context(search_results)
-        user_message = self._build_user_message(
-            query, context, vehicle_variant, maintenance_category
-        )
-
+        user_msg = self._build_user_message(query, context, vehicle_variant, maintenance_category)
         messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-        if conversation_history:
-            messages.extend(conversation_history)
-        messages.append({"role": "user", "content": user_message})
+        if conversation_history: messages.extend(conversation_history)
+        messages.append({"role": "user", "content": user_msg})
+        if self.provider == PROVIDER_OLLAMA:       yield from self._stream_ollama(messages)
+        elif self.provider == PROVIDER_OPENAI:     yield from self._stream_openai(messages)
+        elif self.provider == PROVIDER_ANTHROPIC:  yield from self._stream_anthropic(messages)
+        else: yield f"❌ Unknown provider: {self.provider}"
 
-        if self.provider == PROVIDER_OLLAMA:
-            yield from self._stream_ollama(messages)
-        elif self.provider == PROVIDER_OPENAI:
-            yield from self._stream_openai(messages)
-        elif self.provider == PROVIDER_ANTHROPIC:
-            yield from self._stream_anthropic(messages)
-        else:
-            yield f"❌ Unknown provider: {self.provider}"
-
-    def diagnose(
-        self,
-        symptoms: str,
-        search_results: list,
-        vehicle_variant: str = "",
-    ) -> Generator[str, None, None]:
-        """Diagnostic mode — yields tokens just like chat_stream."""
-        prefix = (
-            "The mechanic is reporting the following symptoms and needs help "
-            "diagnosing the issue. Provide a structured troubleshooting guide "
-            "starting with the most likely causes, organized from simplest to "
-            "most complex checks:\n\n"
-        )
+    def diagnose(self, symptoms, search_results, vehicle_variant="") -> Generator:
         yield from self.chat_stream(
-            prefix + symptoms,
-            search_results,
-            vehicle_variant=vehicle_variant,
+            "The mechanic reports the following symptoms. Provide a structured troubleshooting "
+            "guide from simplest to most complex checks:\n\n" + symptoms,
+            search_results, vehicle_variant=vehicle_variant,
         )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# STREAMLIT APP
+# STREAMLIT PAGE CONFIG
 # ═══════════════════════════════════════════════════════════════════════════
 
 st.set_page_config(
@@ -938,103 +669,502 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Custom CSS ─────────────────────────────────────────────────────────────
-st.markdown("""
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DESIGN SYSTEM — CSS
+# ═══════════════════════════════════════════════════════════════════════════
+
+GLOBAL_CSS = """
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Source+Sans+3:wght@400;600;700;900&display=swap');
-    :root {
-        --od-green: #4B5320; --od-green-light: #6B7B3A;
-        --tan: #D2B48C; --tan-light: #E8D5B7; --sand: #C2B280;
-        --warning-red: #C41E3A; --caution-amber: #FF8C00;
-        --steel: #71797E; --dark-border: #3A3D32;
-    }
-    .stApp { font-family: 'Source Sans 3', sans-serif; }
+/* ── Google Fonts ─────────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
-    .header-banner {
-        background: linear-gradient(135deg, #2D3120 0%, #4B5320 50%, #3A3D2C 100%);
-        border: 2px solid var(--od-green-light);
-        border-radius: 8px; padding: 1.5rem 2rem; margin-bottom: 1.5rem;
-        position: relative; overflow: hidden;
-    }
-    .header-banner::before {
-        content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-        background: repeating-linear-gradient(45deg, transparent, transparent 20px,
-                    rgba(255,255,255,0.015) 20px, rgba(255,255,255,0.015) 40px);
-    }
-    .header-banner h1 {
-        color: var(--tan-light); font-family: 'JetBrains Mono', monospace;
-        font-size: 1.8rem; font-weight: 700; margin: 0 0 0.25rem 0;
-        letter-spacing: 2px; position: relative;
-    }
-    .header-banner p {
-        color: var(--sand); font-size: 0.95rem; margin: 0;
-        position: relative; opacity: 0.85;
-    }
-    .status-badge {
-        display: inline-flex; align-items: center; gap: 6px;
-        padding: 4px 12px; border-radius: 20px; font-size: 0.75rem;
-        font-family: 'JetBrains Mono', monospace; font-weight: 600; letter-spacing: 0.5px;
-    }
-    .status-ready { background: rgba(75,83,32,0.3); border: 1px solid var(--od-green-light); color: var(--od-green-light); }
-    .status-processing { background: rgba(255,140,0,0.2); border: 1px solid var(--caution-amber); color: var(--caution-amber); }
-    .status-error { background: rgba(196,30,58,0.2); border: 1px solid var(--warning-red); color: var(--warning-red); }
+/* ── Design Tokens ────────────────────────────────────────────────────── */
+:root {
+  /* Military palette */
+  --c-bg:          #0f1108;
+  --c-surface:     #171a10;
+  --c-surface-2:   #1e2218;
+  --c-surface-3:   #252820;
+  --c-border:      #2e332a;
+  --c-border-2:    #3a3d32;
 
-    .ref-card {
-        background: rgba(210,180,140,0.08); border: 1px solid var(--dark-border);
-        border-radius: 6px; padding: 0.6rem 0.8rem; margin: 0.25rem 0; font-size: 0.85rem;
-    }
-    .ref-card .source-name {
-        font-family: 'JetBrains Mono', monospace; font-weight: 600;
-        color: var(--tan); font-size: 0.8rem;
-    }
-    section[data-testid="stSidebar"] { background: linear-gradient(180deg, #1e2218, #252820); }
-    section[data-testid="stSidebar"] .stMarkdown h3 {
-        color: var(--tan-light); font-family: 'JetBrains Mono', monospace;
-        font-size: 0.85rem; letter-spacing: 1.5px; text-transform: uppercase;
-        border-bottom: 1px solid var(--dark-border); padding-bottom: 0.5rem;
-    }
+  /* Accent greens */
+  --c-green-900:   #1a1f0d;
+  --c-green-800:   #2d3520;
+  --c-green-700:   #3d4a28;
+  --c-green-600:   #4b5320;
+  --c-green-500:   #5c6628;
+  --c-green-400:   #6b7b3a;
+  --c-green-300:   #8a9e4e;
+  --c-green-200:   #b5c97a;
+  --c-green-100:   #dde8b0;
+
+  /* Tan / Sand */
+  --c-tan:         #c2a96e;
+  --c-tan-light:   #d4bc8a;
+  --c-tan-dim:     #8a7550;
+  --c-sand:        #e8d8b0;
+
+  /* Status */
+  --c-success:     #4caf50;
+  --c-warning:     #ff9800;
+  --c-error:       #e53935;
+  --c-info:        #42a5f5;
+
+  /* Typography */
+  --font-body:     'Inter', system-ui, sans-serif;
+  --font-mono:     'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Spacing */
+  --radius-sm:     4px;
+  --radius-md:     8px;
+  --radius-lg:     12px;
+  --radius-xl:     16px;
+  --radius-pill:   999px;
+
+  /* Shadows */
+  --shadow-sm:     0 1px 3px rgba(0,0,0,.4);
+  --shadow-md:     0 4px 12px rgba(0,0,0,.5);
+  --shadow-lg:     0 8px 24px rgba(0,0,0,.6);
+
+  /* Transitions */
+  --transition:    0.18s cubic-bezier(.4,0,.2,1);
+}
+
+/* ── Global resets ────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+.stApp {
+  font-family: var(--font-body);
+  background: var(--c-bg);
+  color: #d4d8cc;
+}
+
+/* Hide Streamlit chrome */
+#MainMenu, footer, header { visibility: hidden; }
+.block-container { padding-top: 1rem !important; max-width: 100% !important; }
+
+/* ── Scrollbar ────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--c-surface); }
+::-webkit-scrollbar-thumb { background: var(--c-border-2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--c-green-400); }
+
+/* ── Sidebar ──────────────────────────────────────────────────────────── */
+section[data-testid="stSidebar"] {
+  background: linear-gradient(180deg, var(--c-surface) 0%, var(--c-surface-2) 100%);
+  border-right: 1px solid var(--c-border);
+}
+section[data-testid="stSidebar"] > div { padding-top: 0 !important; }
+
+/* Sidebar section labels */
+.sb-label {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono); font-size: 0.7rem; font-weight: 700;
+  letter-spacing: 2px; text-transform: uppercase;
+  color: var(--c-green-300); padding: 1rem 0 0.5rem 0;
+  border-bottom: 1px solid var(--c-border);
+  margin-bottom: 0.75rem;
+}
+.sb-label svg { flex-shrink: 0; }
+
+/* Sidebar provider card */
+.provider-card {
+  background: var(--c-surface-3); border: 1px solid var(--c-border);
+  border-radius: var(--radius-md); padding: 0.75rem;
+  margin-bottom: 0.75rem; transition: border-color var(--transition);
+}
+.provider-card:hover { border-color: var(--c-green-400); }
+
+/* Provider selector pills */
+.provider-pills {
+  display: flex; gap: 6px; margin-bottom: 0.75rem; flex-wrap: wrap;
+}
+.provider-pill {
+  flex: 1; min-width: 70px; padding: 6px 10px; border-radius: var(--radius-pill);
+  font-family: var(--font-mono); font-size: 0.65rem; font-weight: 600;
+  text-align: center; cursor: pointer; border: 1px solid var(--c-border-2);
+  background: transparent; color: #8a9080;
+  transition: all var(--transition); white-space: nowrap;
+}
+.provider-pill.active {
+  background: var(--c-green-800); border-color: var(--c-green-400);
+  color: var(--c-green-200); box-shadow: 0 0 0 2px rgba(107,123,58,.25);
+}
+.provider-pill:hover:not(.active) {
+  border-color: var(--c-green-500); color: var(--c-green-300);
+}
+
+/* Connection dot */
+.conn-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  margin-right: 6px; flex-shrink: 0;
+}
+.conn-dot.online  { background: var(--c-success); box-shadow: 0 0 6px var(--c-success); }
+.conn-dot.offline { background: var(--c-error);   box-shadow: 0 0 6px var(--c-error); }
+.conn-dot.unknown { background: var(--c-warning);  box-shadow: 0 0 6px var(--c-warning); }
+
+/* Streamlit input overrides */
+section[data-testid="stSidebar"] .stTextInput input,
+section[data-testid="stSidebar"] .stSelectbox select {
+  background: var(--c-surface) !important;
+  border: 1px solid var(--c-border-2) !important;
+  border-radius: var(--radius-sm) !important;
+  color: #c8cdc0 !important; font-family: var(--font-mono) !important;
+  font-size: 0.8rem !important;
+}
+section[data-testid="stSidebar"] .stTextInput input:focus,
+section[data-testid="stSidebar"] .stSelectbox select:focus {
+  border-color: var(--c-green-400) !important;
+  box-shadow: 0 0 0 2px rgba(107,123,58,.2) !important;
+}
+section[data-testid="stSidebar"] label {
+  color: #8a9080 !important; font-size: 0.75rem !important;
+  font-family: var(--font-mono) !important; letter-spacing: .5px;
+}
+
+/* KB stat chips */
+.kb-stat {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--c-green-900); border: 1px solid var(--c-green-700);
+  border-radius: var(--radius-pill); padding: 2px 10px;
+  font-family: var(--font-mono); font-size: 0.7rem; color: var(--c-green-300);
+}
+.kb-stat strong { color: var(--c-green-200); margin-left: 2px; }
+
+/* Source chip in sidebar */
+.src-chip {
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(75,83,32,.12); border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm); padding: 5px 8px; margin: 3px 0;
+  font-family: var(--font-mono); font-size: 0.72rem; color: var(--c-tan-dim);
+  transition: all var(--transition);
+}
+.src-chip:hover { border-color: var(--c-green-500); color: var(--c-tan); }
+.src-chip-icon { color: var(--c-green-400); font-size: 0.8rem; }
+
+/* ── Top bar ──────────────────────────────────────────────────────────── */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  background: linear-gradient(90deg, var(--c-green-900) 0%, #1a1f10 60%, var(--c-surface) 100%);
+  border: 1px solid var(--c-border); border-radius: var(--radius-lg);
+  padding: 0.75rem 1.25rem; margin-bottom: 1rem;
+  box-shadow: var(--shadow-md);
+  position: relative; overflow: hidden;
+}
+.topbar::before {
+  content: ''; position: absolute; inset: 0;
+  background: repeating-linear-gradient(
+    60deg, transparent, transparent 30px,
+    rgba(107,123,58,.03) 30px, rgba(107,123,58,.03) 60px
+  );
+  pointer-events: none;
+}
+.topbar-left { display: flex; align-items: center; gap: 14px; z-index: 1; }
+.topbar-logo {
+  font-family: var(--font-mono); font-size: 1.35rem; font-weight: 700;
+  color: var(--c-tan-light); letter-spacing: 1px; line-height: 1;
+}
+.topbar-logo span { color: var(--c-green-400); }
+.topbar-sub {
+  font-size: 0.72rem; color: var(--c-tan-dim);
+  font-family: var(--font-mono); letter-spacing: .5px;
+}
+.topbar-divider {
+  width: 1px; height: 36px; background: var(--c-border-2); margin: 0 4px;
+}
+.topbar-right { display: flex; align-items: center; gap: 8px; z-index: 1; flex-wrap: wrap; }
+
+/* Status pill */
+.spill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 11px; border-radius: var(--radius-pill);
+  font-family: var(--font-mono); font-size: 0.68rem; font-weight: 600;
+  letter-spacing: .5px; white-space: nowrap;
+  transition: all var(--transition);
+}
+.spill-ok    { background: rgba(76,175,80,.12); border: 1px solid rgba(76,175,80,.4);  color: #81c784; }
+.spill-warn  { background: rgba(255,152,0,.12); border: 1px solid rgba(255,152,0,.4);  color: #ffb74d; }
+.spill-err   { background: rgba(229,57,53,.12); border: 1px solid rgba(229,57,53,.4);  color: #e57373; }
+.spill-info  { background: rgba(66,165,245,.12); border: 1px solid rgba(66,165,245,.4); color: #64b5f6; }
+
+/* Pulse animation for live status */
+@keyframes pulse {
+  0%,100% { opacity: 1; } 50% { opacity: .4; }
+}
+.pulse { animation: pulse 2s ease-in-out infinite; }
+
+/* ── Mode toggle bar ──────────────────────────────────────────────────── */
+.mode-bar {
+  display: flex; gap: 4px; background: var(--c-surface-2);
+  border: 1px solid var(--c-border); border-radius: var(--radius-pill);
+  padding: 3px; width: fit-content; margin: 0 auto 1rem auto;
+}
+.mode-tab {
+  padding: 6px 18px; border-radius: var(--radius-pill); border: none;
+  font-family: var(--font-mono); font-size: 0.75rem; font-weight: 600;
+  cursor: pointer; transition: all var(--transition);
+  background: transparent; color: #6a7060; letter-spacing: .3px;
+}
+.mode-tab.active {
+  background: var(--c-green-700); color: var(--c-green-100);
+  box-shadow: var(--shadow-sm);
+}
+.mode-tab:hover:not(.active) { color: var(--c-green-300); background: var(--c-green-900); }
+
+/* ── Welcome screen ───────────────────────────────────────────────────── */
+.welcome-wrap {
+  max-width: 860px; margin: 2rem auto; padding: 0 1rem; text-align: center;
+}
+.welcome-title {
+  font-family: var(--font-mono); font-size: 1.6rem; font-weight: 700;
+  color: var(--c-tan-light); letter-spacing: 1px; margin-bottom: .5rem;
+}
+.welcome-sub {
+  color: #7a8070; font-size: 0.95rem; line-height: 1.7;
+  max-width: 580px; margin: 0 auto 2rem auto;
+}
+.step-cards { display: flex; gap: 16px; margin-top: 1.5rem; flex-wrap: wrap; }
+.step-card {
+  flex: 1; min-width: 220px;
+  background: var(--c-surface-2); border: 1px solid var(--c-border);
+  border-radius: var(--radius-lg); padding: 1.25rem;
+  transition: all var(--transition); text-align: left;
+  position: relative; overflow: hidden;
+}
+.step-card::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, var(--c-green-600), var(--c-green-300));
+  transform: scaleX(0); transform-origin: left;
+  transition: transform 0.3s ease;
+}
+.step-card:hover::before { transform: scaleX(1); }
+.step-card:hover { border-color: var(--c-green-500); transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.step-card.done { border-color: rgba(76,175,80,.4); }
+.step-card.done::before { transform: scaleX(1); background: var(--c-success); }
+.step-num {
+  font-family: var(--font-mono); font-size: 0.65rem; font-weight: 700;
+  color: var(--c-green-400); letter-spacing: 2px; text-transform: uppercase;
+  margin-bottom: 0.5rem;
+}
+.step-icon { font-size: 1.6rem; margin-bottom: 0.5rem; display: block; }
+.step-title {
+  font-family: var(--font-mono); font-size: 0.9rem; font-weight: 600;
+  color: var(--c-tan-light); margin-bottom: 0.35rem;
+}
+.step-desc { font-size: 0.8rem; color: #7a8070; line-height: 1.5; }
+.step-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 0.68rem; font-family: var(--font-mono); font-weight: 600;
+  padding: 2px 8px; border-radius: var(--radius-pill); margin-top: 0.5rem;
+}
+.step-badge.done { background: rgba(76,175,80,.15); color: #81c784; border: 1px solid rgba(76,175,80,.3); }
+.step-badge.pending { background: rgba(255,152,0,.1); color: #ffb74d; border: 1px solid rgba(255,152,0,.3); }
+
+/* ── Quick actions ────────────────────────────────────────────────────── */
+.qa-section-label {
+  font-family: var(--font-mono); font-size: 0.68rem; font-weight: 700;
+  letter-spacing: 2px; color: var(--c-green-400); text-transform: uppercase;
+  margin-bottom: 0.6rem; display: flex; align-items: center; gap: 6px;
+}
+.qa-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 1rem; }
+.qa-btn {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--c-surface-2); border: 1px solid var(--c-border);
+  border-radius: var(--radius-md); padding: 8px 12px;
+  font-family: var(--font-body); font-size: 0.8rem; font-weight: 500;
+  color: #a0a898; cursor: pointer; transition: all var(--transition);
+  text-align: left; width: 100%;
+}
+.qa-btn:hover {
+  background: var(--c-green-900); border-color: var(--c-green-500);
+  color: var(--c-green-200); transform: translateY(-1px); box-shadow: var(--shadow-sm);
+}
+.qa-btn-icon { font-size: 1rem; flex-shrink: 0; }
+.qa-btn-text { line-height: 1.2; }
+
+/* ── Chat messages ────────────────────────────────────────────────────── */
+.stChatMessage {
+  background: transparent !important;
+  border: none !important;
+}
+
+/* user bubble */
+[data-testid="stChatMessage"]:has([data-testid="stChatMessageContent"]) {
+  padding: 0.25rem 0;
+}
+
+/* Source reference panel */
+.src-panel {
+  background: var(--c-surface-2); border: 1px solid var(--c-border);
+  border-radius: var(--radius-md); padding: 0; margin-top: 0.5rem;
+  overflow: hidden;
+}
+.src-panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; background: var(--c-surface-3);
+  border-bottom: 1px solid var(--c-border);
+  font-family: var(--font-mono); font-size: 0.72rem; font-weight: 600;
+  color: var(--c-green-300); cursor: pointer;
+}
+.src-ref-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px; border-bottom: 1px solid var(--c-border);
+  transition: background var(--transition);
+}
+.src-ref-row:last-child { border-bottom: none; }
+.src-ref-row:hover { background: rgba(75,83,32,.08); }
+.src-ref-num {
+  font-family: var(--font-mono); font-size: 0.65rem; font-weight: 700;
+  background: var(--c-green-800); color: var(--c-green-200);
+  border-radius: var(--radius-sm); padding: 1px 6px; flex-shrink: 0; margin-top: 2px;
+}
+.src-ref-meta { flex: 1; min-width: 0; }
+.src-ref-file {
+  font-family: var(--font-mono); font-size: 0.72rem; color: var(--c-tan);
+  font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.src-ref-page { font-size: 0.7rem; color: #6a7060; margin-top: 1px; }
+.src-ref-text { font-size: 0.75rem; color: #8a9080; margin-top: 4px; line-height: 1.45; }
+.relevance-bar {
+  width: 60px; flex-shrink: 0; text-align: right;
+}
+.relevance-val {
+  font-family: var(--font-mono); font-size: 0.65rem; font-weight: 700;
+  color: var(--c-green-300);
+}
+.relevance-track {
+  width: 100%; height: 3px; background: var(--c-border);
+  border-radius: 2px; margin-top: 3px; overflow: hidden;
+}
+.relevance-fill {
+  height: 100%; border-radius: 2px;
+  background: linear-gradient(90deg, var(--c-green-600), var(--c-green-300));
+}
+
+/* ── Streamlit widget overrides ───────────────────────────────────────── */
+/* Buttons */
+.stButton > button {
+  background: var(--c-surface-3) !important;
+  border: 1px solid var(--c-border-2) !important;
+  color: #a0a898 !important; border-radius: var(--radius-md) !important;
+  font-family: var(--font-body) !important; font-size: 0.82rem !important;
+  font-weight: 500 !important; transition: all var(--transition) !important;
+  padding: 0.4rem 0.9rem !important;
+}
+.stButton > button:hover {
+  background: var(--c-green-800) !important;
+  border-color: var(--c-green-400) !important;
+  color: var(--c-green-100) !important;
+  transform: translateY(-1px) !important;
+  box-shadow: var(--shadow-sm) !important;
+}
+.stButton > button[kind="primary"] {
+  background: var(--c-green-700) !important;
+  border-color: var(--c-green-400) !important;
+  color: var(--c-green-100) !important;
+}
+.stButton > button[kind="primary"]:hover {
+  background: var(--c-green-600) !important;
+}
+
+/* Chat input */
+.stChatInput textarea {
+  background: var(--c-surface-2) !important;
+  border: 1px solid var(--c-border-2) !important;
+  border-radius: var(--radius-md) !important;
+  color: #d0d4c8 !important; font-family: var(--font-body) !important;
+  font-size: 0.9rem !important;
+}
+.stChatInput textarea:focus {
+  border-color: var(--c-green-400) !important;
+  box-shadow: 0 0 0 2px rgba(107,123,58,.2) !important;
+}
+
+/* Expanders */
+.streamlit-expanderHeader {
+  background: var(--c-surface-2) !important;
+  border: 1px solid var(--c-border) !important;
+  border-radius: var(--radius-md) !important;
+  color: #9aa090 !important;
+  font-family: var(--font-mono) !important; font-size: 0.8rem !important;
+}
+.streamlit-expanderContent {
+  background: var(--c-surface-2) !important;
+  border: 1px solid var(--c-border) !important;
+  border-top: none !important;
+  border-radius: 0 0 var(--radius-md) var(--radius-md) !important;
+}
+
+/* Metrics */
+[data-testid="stMetric"] {
+  background: var(--c-surface-2); border: 1px solid var(--c-border);
+  border-radius: var(--radius-md); padding: 10px 14px;
+}
+[data-testid="stMetricLabel"] { color: #6a7060 !important; font-size: 0.72rem !important; }
+[data-testid="stMetricValue"] { color: var(--c-tan-light) !important; font-family: var(--font-mono) !important; }
+
+/* Alerts */
+.stSuccess { background: rgba(76,175,80,.1) !important; border-color: rgba(76,175,80,.3) !important; color: #81c784 !important; border-radius: var(--radius-md) !important; }
+.stWarning { background: rgba(255,152,0,.1) !important; border-color: rgba(255,152,0,.3) !important; color: #ffb74d !important; border-radius: var(--radius-md) !important; }
+.stError   { background: rgba(229,57,53,.1) !important; border-color: rgba(229,57,53,.3) !important; color: #e57373 !important; border-radius: var(--radius-md) !important; }
+.stInfo    { background: rgba(66,165,245,.1) !important; border-color: rgba(66,165,245,.3) !important; color: #64b5f6 !important; border-radius: var(--radius-md) !important; }
+
+/* Radio */
+.stRadio label { color: #9aa090 !important; font-size: 0.82rem !important; }
+.stRadio [data-testid="stMarkdownContainer"] p { font-size: 0.82rem !important; }
+
+/* Divider */
+hr { border-color: var(--c-border) !important; margin: 0.5rem 0 !important; }
+
+/* File uploader */
+[data-testid="stFileUploader"] {
+  background: var(--c-surface-3) !important;
+  border: 1px dashed var(--c-border-2) !important;
+  border-radius: var(--radius-md) !important;
+}
+[data-testid="stFileUploader"]:hover { border-color: var(--c-green-400) !important; }
 </style>
-""", unsafe_allow_html=True)
+"""
+
+st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 
 
-# ── Session State ──────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+# SESSION STATE
+# ═══════════════════════════════════════════════════════════════════════════
 
 def init_session():
-    # Load persisted settings once per session
     if "_settings_loaded" not in st.session_state:
         saved = load_settings()
-        st.session_state._settings_loaded = True
-        st.session_state.provider = saved["provider"]
-        st.session_state.ollama_url = saved["ollama_url"]
-        st.session_state.ollama_model = saved["ollama_model"]
-        st.session_state.openai_url = saved["openai_url"]
-        st.session_state.openai_model = saved["openai_model"]
-        st.session_state.openai_api_key = saved["openai_api_key"]
+        st.session_state._settings_loaded  = True
+        st.session_state.provider          = saved["provider"]
+        st.session_state.ollama_url        = saved["ollama_url"]
+        st.session_state.ollama_model      = saved["ollama_model"]
+        st.session_state.openai_url        = saved["openai_url"]
+        st.session_state.openai_model      = saved["openai_model"]
+        st.session_state.openai_api_key    = saved["openai_api_key"]
         st.session_state.anthropic_api_key = saved["anthropic_api_key"]
-        st.session_state.anthropic_model = saved["anthropic_model"]
+        st.session_state.anthropic_model   = saved["anthropic_model"]
 
-    runtime_defaults = {
-        "messages": [],
-        "vehicle_variant": "",
-        "maintenance_category": "",
-        "mode": "chat",
-        "show_sources": True,
-        "search_results_cache": [],
-    }
-    for k, v in runtime_defaults.items():
+    for k, v in {
+        "messages": [], "vehicle_variant": "", "maintenance_category": "",
+        "mode": "chat", "show_sources": True,
+    }.items():
         if k not in st.session_state:
             st.session_state[k] = v
-
 
 init_session()
 
 
-# ── Cached Resources ──────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+# CACHED RESOURCES
+# ═══════════════════════════════════════════════════════════════════════════
 
 @st.cache_resource
 def get_pdf_processor():
     return PDFProcessor()
-
 
 @st.cache_resource
 def get_vector_store():
@@ -1042,9 +1172,7 @@ def get_vector_store():
     vs.initialize()
     return vs
 
-
-def _collect_settings_from_state() -> dict:
-    """Pull current provider config from session state."""
+def _collect_settings() -> dict:
     return {
         "provider": st.session_state.provider,
         "ollama_url": st.session_state.ollama_url,
@@ -1056,593 +1184,570 @@ def _collect_settings_from_state() -> dict:
         "anthropic_model": st.session_state.anthropic_model,
     }
 
-
 def get_ai_engine() -> AIEngine:
-    provider = st.session_state.provider
-    cache_key = json.dumps(_collect_settings_from_state(), sort_keys=True)
-    if (
-        "ai_engine" not in st.session_state
-        or st.session_state.get("_ai_cache_key") != cache_key
-    ):
-        if provider == PROVIDER_OLLAMA:
-            engine = AIEngine(
-                provider,
-                base_url=st.session_state.ollama_url,
-                model=st.session_state.ollama_model,
-            )
-        elif provider == PROVIDER_OPENAI:
-            engine = AIEngine(
-                provider,
-                base_url=st.session_state.openai_url,
-                model=st.session_state.openai_model,
-                api_key=st.session_state.openai_api_key,
-            )
-        elif provider == PROVIDER_ANTHROPIC:
-            engine = AIEngine(
-                provider,
-                api_key=st.session_state.anthropic_api_key,
-                model=st.session_state.anthropic_model,
-            )
+    cache_key = json.dumps(_collect_settings(), sort_keys=True)
+    if "ai_engine" not in st.session_state or st.session_state.get("_ai_key") != cache_key:
+        p = st.session_state.provider
+        if p == PROVIDER_OLLAMA:
+            e = AIEngine(p, base_url=st.session_state.ollama_url, model=st.session_state.ollama_model)
+        elif p == PROVIDER_OPENAI:
+            e = AIEngine(p, base_url=st.session_state.openai_url, model=st.session_state.openai_model,
+                         api_key=st.session_state.openai_api_key)
+        elif p == PROVIDER_ANTHROPIC:
+            e = AIEngine(p, api_key=st.session_state.anthropic_api_key, model=st.session_state.anthropic_model)
         else:
-            engine = AIEngine(PROVIDER_OLLAMA)
-        st.session_state.ai_engine = engine
-        st.session_state._ai_cache_key = cache_key
+            e = AIEngine(PROVIDER_OLLAMA)
+        st.session_state.ai_engine = e
+        st.session_state._ai_key   = cache_key
     return st.session_state.ai_engine
 
 
-# ── Sidebar ────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+# SIDEBAR
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _sb_label(icon: str, text: str):
+    st.markdown(f'<div class="sb-label">{icon}&nbsp; {text}</div>', unsafe_allow_html=True)
 
 def _provider_section():
-    """Render the AI provider configuration block in the sidebar."""
-    st.markdown("### 🤖 AI PROVIDER")
+    _sb_label("🤖", "AI PROVIDER")
+    provider = st.session_state.provider
+    changed  = False
 
-    provider = st.selectbox(
+    # Provider selector pills rendered via radio (styled via CSS to look like pills)
+    new_provider = st.radio(
         "Provider",
         ALL_PROVIDERS,
-        index=ALL_PROVIDERS.index(st.session_state.provider)
-        if st.session_state.provider in ALL_PROVIDERS
-        else 0,
-        key="_provider_select",
+        index=ALL_PROVIDERS.index(provider) if provider in ALL_PROVIDERS else 0,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="_prov_radio",
     )
-
-    settings_changed = False
-
-    if provider != st.session_state.provider:
-        st.session_state.provider = provider
-        settings_changed = True
+    if new_provider != provider:
+        st.session_state.provider = new_provider
+        provider = new_provider
+        changed = True
 
     # ── Ollama ──────────────────────────────────────────────────────────
     if provider == PROVIDER_OLLAMA:
-        ollama_url = st.text_input(
-            "Ollama URL",
-            value=st.session_state.ollama_url,
-            help="Default: http://localhost:11434",
-            key="_ollama_url",
-        )
+        ollama_url = st.text_input("Ollama URL", value=st.session_state.ollama_url,
+                                   key="_ollama_url", label_visibility="visible")
         if ollama_url != st.session_state.ollama_url:
-            st.session_state.ollama_url = ollama_url
-            settings_changed = True
+            st.session_state.ollama_url = ollama_url; changed = True
 
         is_connected = AIEngine.check_ollama(ollama_url)
+        dot = "online" if is_connected else "offline"
+        status_text = "Connected" if is_connected else "Offline"
+        st.markdown(
+            f'<div style="display:flex;align-items:center;font-family:var(--font-mono);'
+            f'font-size:.72rem;color:#6a7060;margin:-4px 0 8px 0;">'
+            f'<span class="conn-dot {dot}"></span>{status_text}</div>',
+            unsafe_allow_html=True,
+        )
         if is_connected:
-            available_models = AIEngine.list_ollama_models(ollama_url)
-            if available_models:
-                current = st.session_state.ollama_model
-                default_idx = available_models.index(current) if current in available_models else 0
-                selected = st.selectbox(
-                    "Model",
-                    available_models,
-                    index=default_idx,
-                    help="Models available in your local Ollama instance",
-                    key="_ollama_model",
-                )
-                if selected != st.session_state.ollama_model:
-                    st.session_state.ollama_model = selected
-                    settings_changed = True
-                st.success(f"✅ Connected — {len(available_models)} model(s)")
+            models = AIEngine.list_ollama_models(ollama_url)
+            if models:
+                cur_idx = models.index(st.session_state.ollama_model) if st.session_state.ollama_model in models else 0
+                sel = st.selectbox("Model", models, index=cur_idx, key="_ollama_model_sel")
+                if sel != st.session_state.ollama_model:
+                    st.session_state.ollama_model = sel; changed = True
             else:
-                # Allow freeform model entry when no models are listed
-                model_input = st.text_input(
-                    "Model name",
-                    value=st.session_state.ollama_model,
-                    help="e.g. gpt-oss:latest",
-                    key="_ollama_model_text",
-                )
-                if model_input != st.session_state.ollama_model:
-                    st.session_state.ollama_model = model_input
-                    settings_changed = True
-                st.warning("Connected but no models found. Run:\n`ollama pull gpt-oss:latest`")
+                m = st.text_input("Model", value=st.session_state.ollama_model, key="_ollama_model_txt")
+                if m != st.session_state.ollama_model:
+                    st.session_state.ollama_model = m; changed = True
+                st.caption("No models found — run `ollama pull gpt-oss:latest`")
         else:
-            model_input = st.text_input(
-                "Model name",
-                value=st.session_state.ollama_model,
-                help="Model to use once Ollama is running",
-                key="_ollama_model_offline",
-            )
-            if model_input != st.session_state.ollama_model:
-                st.session_state.ollama_model = model_input
-                settings_changed = True
-            st.error(
-                "❌ Cannot reach Ollama.\n\n"
-                "**Start it with:**\n```\nollama serve\n```\n"
-                "**Then pull a model:**\n```\nollama pull gpt-oss:latest\n```"
-            )
+            m = st.text_input("Model", value=st.session_state.ollama_model, key="_ollama_model_off")
+            if m != st.session_state.ollama_model:
+                st.session_state.ollama_model = m; changed = True
+            st.caption("Start Ollama: `ollama serve`")
 
-    # ── OpenAI-compatible ────────────────────────────────────────────────
+    # ── OpenAI-Compatible ────────────────────────────────────────────────
     elif provider == PROVIDER_OPENAI:
-        openai_url = st.text_input(
-            "API Base URL",
-            value=st.session_state.openai_url,
-            help="e.g. https://api.openai.com/v1  or  http://localhost:8000/v1",
-            key="_openai_url",
-        )
-        if openai_url != st.session_state.openai_url:
-            st.session_state.openai_url = openai_url
-            settings_changed = True
-
-        openai_model = st.text_input(
-            "Model",
-            value=st.session_state.openai_model,
-            help="e.g. gpt-4o, gpt-4o-mini, mistral-7b-instruct",
-            key="_openai_model",
-        )
-        if openai_model != st.session_state.openai_model:
-            st.session_state.openai_model = openai_model
-            settings_changed = True
-
-        openai_key = st.text_input(
-            "API Key",
-            value=st.session_state.openai_api_key,
-            type="password",
-            help="Leave blank for local/no-auth endpoints",
-            key="_openai_key",
-        )
-        if openai_key != st.session_state.openai_api_key:
-            st.session_state.openai_api_key = openai_key
-            settings_changed = True
-
-        st.caption("Compatible with OpenAI, Together AI, Groq, vLLM, LM Studio, etc.")
+        u = st.text_input("Base URL", value=st.session_state.openai_url, key="_oai_url",
+                           help="e.g. https://api.openai.com/v1 or http://localhost:8000/v1")
+        if u != st.session_state.openai_url:
+            st.session_state.openai_url = u; changed = True
+        m = st.text_input("Model", value=st.session_state.openai_model, key="_oai_model",
+                           help="e.g. gpt-4o, gpt-4o-mini")
+        if m != st.session_state.openai_model:
+            st.session_state.openai_model = m; changed = True
+        k = st.text_input("API Key", value=st.session_state.openai_api_key, type="password",
+                           key="_oai_key", help="Leave blank for no-auth local endpoints")
+        if k != st.session_state.openai_api_key:
+            st.session_state.openai_api_key = k; changed = True
+        st.caption("Works with OpenAI · Together AI · Groq · vLLM · LM Studio")
 
     # ── Anthropic ────────────────────────────────────────────────────────
     elif provider == PROVIDER_ANTHROPIC:
-        anthropic_key = st.text_input(
-            "API Key",
-            value=st.session_state.anthropic_api_key,
-            type="password",
-            help="Your Anthropic API key (sk-ant-...)",
-            key="_anthropic_key",
+        k = st.text_input("API Key", value=st.session_state.anthropic_api_key,
+                           type="password", key="_ant_key", help="sk-ant-...")
+        if k != st.session_state.anthropic_api_key:
+            st.session_state.anthropic_api_key = k; changed = True
+        m = st.text_input("Model", value=st.session_state.anthropic_model, key="_ant_model",
+                           help="e.g. claude-opus-4-6")
+        if m != st.session_state.anthropic_model:
+            st.session_state.anthropic_model = m; changed = True
+        dot = "online" if st.session_state.anthropic_api_key else "offline"
+        status_text = "Key configured" if st.session_state.anthropic_api_key else "No API key"
+        st.markdown(
+            f'<div style="display:flex;align-items:center;font-family:var(--font-mono);'
+            f'font-size:.72rem;color:#6a7060;margin:-4px 0 8px 0;">'
+            f'<span class="conn-dot {dot}"></span>{status_text}</div>',
+            unsafe_allow_html=True,
         )
-        if anthropic_key != st.session_state.anthropic_api_key:
-            st.session_state.anthropic_api_key = anthropic_key
-            settings_changed = True
 
-        anthropic_model = st.text_input(
-            "Model",
-            value=st.session_state.anthropic_model,
-            help="e.g. claude-opus-4-6, claude-sonnet-4-5-20250929",
-            key="_anthropic_model",
-        )
-        if anthropic_model != st.session_state.anthropic_model:
-            st.session_state.anthropic_model = anthropic_model
-            settings_changed = True
-
-        if st.session_state.anthropic_api_key:
-            st.success("✅ API key configured")
-        else:
-            st.warning("Enter your Anthropic API key above.")
-
-    # Persist whenever something changed
-    if settings_changed:
-        save_settings(_collect_settings_from_state())
+    if changed:
+        save_settings(_collect_settings())
 
 
 def render_sidebar():
     with st.sidebar:
-        _provider_section()
-
-        st.divider()
-        st.markdown("### 🚛 VEHICLE")
-        variant = st.selectbox("HMMWV Variant", ["(Auto-detect)"] + HMMWV_VARIANTS)
-        st.session_state.vehicle_variant = "" if variant == "(Auto-detect)" else variant
-        category = st.selectbox("Maintenance Category", ["(Any)"] + MAINTENANCE_CATEGORIES)
-        st.session_state.maintenance_category = "" if category == "(Any)" else category
-
-        st.divider()
-        st.markdown("### 🎯 MODE")
-        mode = st.radio(
-            "Assistant Mode",
-            ["💬 Chat", "🔍 Diagnose", "📋 PMCS Walkthrough"],
-            help=(
-                "**Chat**: General queries  \n"
-                "**Diagnose**: Symptom-based troubleshooting  \n"
-                "**PMCS**: Guided checklists"
-            ),
+        # Brand mark
+        st.markdown(
+            '<div style="padding:1rem 0 0.5rem;text-align:center;">'
+            '<div style="font-family:var(--font-mono);font-size:1.1rem;font-weight:700;'
+            'color:var(--c-tan-light);letter-spacing:2px;">🔧 HMMWV</div>'
+            '<div style="font-family:var(--font-mono);font-size:0.6rem;color:var(--c-tan-dim);'
+            'letter-spacing:3px;text-transform:uppercase;">Technical Assistant</div>'
+            '</div>',
+            unsafe_allow_html=True,
         )
-        st.session_state.mode = {
-            "💬 Chat": "chat",
-            "🔍 Diagnose": "diagnose",
-            "📋 PMCS Walkthrough": "pmcs",
-        }[mode]
-
         st.divider()
-        st.markdown("### 📚 KNOWLEDGE BASE")
-        proc = get_pdf_processor()
-        vs = get_vector_store()
-        vs_stats = vs.get_stats()
-        status = proc.get_processing_status()
 
+        _provider_section()
+        st.divider()
+
+        # Vehicle
+        _sb_label("🚛", "VEHICLE")
+        variant  = st.selectbox("Variant", ["(Auto-detect)"] + HMMWV_VARIANTS, label_visibility="collapsed")
+        st.session_state.vehicle_variant = "" if variant == "(Auto-detect)" else variant
+        category = st.selectbox("Category", ["(Any)"] + MAINTENANCE_CATEGORIES, label_visibility="collapsed")
+        st.session_state.maintenance_category = "" if category == "(Any)" else category
+        st.divider()
+
+        # Knowledge base
+        _sb_label("📚", "KNOWLEDGE BASE")
+        proc     = get_pdf_processor()
+        vs       = get_vector_store()
+        vs_stats = vs.get_stats()
+        status   = proc.get_processing_status()
+
+        # Stats row
         c1, c2 = st.columns(2)
         c1.metric("PDFs", status["total_pdfs"])
         c2.metric("Chunks", vs_stats["total_chunks"])
 
-        uploaded = st.file_uploader(
-            "Upload TM PDFs",
-            type=["pdf"],
-            accept_multiple_files=True,
-            help="Upload HMMWV TMs (TM 9-2320-280-XX)",
-        )
+        uploaded = st.file_uploader("Upload TM PDFs", type=["pdf"], accept_multiple_files=True,
+                                    label_visibility="collapsed")
         if uploaded:
             for f in uploaded:
                 dest = KNOWLEDGE_BASE_DIR / f.name
                 if not dest.exists():
                     dest.write_bytes(f.getvalue())
-                    st.toast(f"📄 Saved: {f.name}", icon="✅")
+                    st.toast(f"Saved: {f.name}", icon="📄")
 
         unproc = status["unprocessed"]
         if unproc > 0:
-            st.warning(f"{unproc} PDF(s) need processing")
-            if st.button("🔄 Process PDFs", use_container_width=True, type="primary"):
-                with st.spinner("Processing PDFs… this may take a few minutes."):
+            st.warning(f"{unproc} PDF(s) pending processing")
+            if st.button("⚙️ Process PDFs", use_container_width=True, type="primary"):
+                with st.spinner("Extracting text and images…"):
                     result = proc.process_all_pdfs()
                     if result["chunks"]:
                         vs.add_chunks(result["chunks"])
-                    st.success(
-                        f"✅ {result['total_pdfs']} PDFs → "
-                        f"{result['total_chunks']} chunks, "
-                        f"{result['total_images']} images"
-                    )
+                    st.success(f"{result['total_pdfs']} PDFs · {result['total_chunks']} chunks · {result['total_images']} images")
                     st.rerun()
         elif status["total_pdfs"] > 0:
-            st.success("✅ All PDFs processed")
+            st.success("All PDFs indexed")
         else:
-            st.info(f"📁 Place PDFs in:\n`{KNOWLEDGE_BASE_DIR}/`\n\nOr use the uploader above.")
+            st.info(f"Drop PDFs into `knowledge_base/` or upload above.")
 
         if status["total_pdfs"] > 0:
-            with st.expander("Advanced"):
+            with st.expander("⚙️ Advanced"):
                 if st.button("♻️ Reprocess All", use_container_width=True):
                     with st.spinner("Reprocessing…"):
                         vs.clear()
                         result = proc.process_all_pdfs(force=True)
-                        if result["chunks"]:
-                            vs.add_chunks(result["chunks"])
+                        if result["chunks"]: vs.add_chunks(result["chunks"])
                         st.success(f"Reprocessed {result['total_pdfs']} PDFs")
                         st.rerun()
                 st.toggle("Show source references", value=True, key="show_sources")
 
         if vs_stats["source_files"]:
             st.divider()
-            st.markdown("### 📑 INDEXED SOURCES")
+            _sb_label("📑", "INDEXED SOURCES")
             for src in vs_stats["source_files"]:
-                safe_src = html_mod.escape(src)
+                safe = html_mod.escape(src)
                 st.markdown(
-                    f"<div class='ref-card'><span class='source-name'>📄 {safe_src}</span></div>",
+                    f'<div class="src-chip"><span class="src-chip-icon">📄</span>{safe}</div>',
                     unsafe_allow_html=True,
                 )
 
         st.divider()
-        if st.button("🗑️ Clear Conversation", use_container_width=True):
+        if st.button("🗑️ Clear Chat", use_container_width=True):
             st.session_state.messages = []
             st.rerun()
 
 
-# ── Header ─────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+# TOP BAR
+# ═══════════════════════════════════════════════════════════════════════════
 
-def render_header():
-    st.markdown("""
-    <div class="header-banner">
-        <h1>🔧 HMMWV TECHNICAL ASSISTANT</h1>
-        <p>Local AI-Powered Maintenance &amp; Repair Guide — Ollama + TM 9-2320-280 Series</p>
-    </div>""", unsafe_allow_html=True)
-
-    vs = get_vector_store()
+def render_topbar():
+    vs    = get_vector_store()
     stats = vs.get_stats()
-    provider = st.session_state.provider
+    prov  = st.session_state.provider
     has_data = stats["total_chunks"] > 0
 
-    # Determine provider connectivity label
-    if provider == PROVIDER_OLLAMA:
-        ollama_ok = AIEngine.check_ollama(st.session_state.ollama_url)
-        provider_ready = ollama_ok
-        provider_label = (
-            f"OLLAMA ● {st.session_state.ollama_model}" if ollama_ok else "OLLAMA OFFLINE"
-        )
-    elif provider == PROVIDER_OPENAI:
-        provider_ready = bool(st.session_state.openai_url)
-        provider_label = f"OPENAI-COMPAT ● {st.session_state.openai_model}"
-    elif provider == PROVIDER_ANTHROPIC:
-        provider_ready = bool(st.session_state.anthropic_api_key)
-        provider_label = f"ANTHROPIC ● {st.session_state.anthropic_model}"
+    if prov == PROVIDER_OLLAMA:
+        ok    = AIEngine.check_ollama(st.session_state.ollama_url)
+        plabel = html_mod.escape(f"Ollama · {st.session_state.ollama_model}")
+        pcls   = "spill-ok" if ok else "spill-err"
+        pdot   = "🟢" if ok else "🔴"
+    elif prov == PROVIDER_OPENAI:
+        ok    = bool(st.session_state.openai_url)
+        plabel = html_mod.escape(f"OpenAI · {st.session_state.openai_model}")
+        pcls   = "spill-ok" if ok else "spill-warn"
+        pdot   = "🟢" if ok else "🟡"
+    elif prov == PROVIDER_ANTHROPIC:
+        ok    = bool(st.session_state.anthropic_api_key)
+        plabel = html_mod.escape(f"Claude · {st.session_state.anthropic_model}")
+        pcls   = "spill-ok" if ok else "spill-warn"
+        pdot   = "🟢" if ok else "🟡"
     else:
-        provider_ready = False
-        provider_label = "UNKNOWN PROVIDER"
+        ok = False; plabel = "Unknown"; pcls = "spill-err"; pdot = "🔴"
 
-    cols = st.columns([2, 2, 2, 4])
-    with cols[0]:
-        badge = "status-ready" if provider_ready else "status-error"
-        safe_label = html_mod.escape(provider_label)
-        st.markdown(
-            f'<span class="status-badge {badge}">● {safe_label}</span>',
-            unsafe_allow_html=True,
-        )
-    with cols[1]:
-        badge = "status-ready" if has_data else "status-processing"
-        label = f'{stats["total_chunks"]} CHUNKS INDEXED' if has_data else "NO DATA LOADED"
-        st.markdown(
-            f'<span class="status-badge {badge}">● {label}</span>',
-            unsafe_allow_html=True,
-        )
-    with cols[2]:
-        v = st.session_state.vehicle_variant or "Any Variant"
-        safe_v = html_mod.escape(v.split("—")[0].strip())
-        st.markdown(
-            f'<span class="status-badge status-ready">● {safe_v}</span>',
-            unsafe_allow_html=True,
-        )
+    kb_cls   = "spill-ok" if has_data else "spill-warn"
+    kb_label = f"{stats['total_chunks']:,} chunks" if has_data else "No data"
+    v_label  = html_mod.escape((st.session_state.vehicle_variant or "All Variants").split("—")[0].strip())
+    mode_labels = {"chat": "💬 Chat", "diagnose": "🔍 Diagnose", "pmcs": "📋 PMCS"}
+    m_label  = mode_labels.get(st.session_state.mode, "💬 Chat")
+
+    st.markdown(f"""
+    <div class="topbar">
+      <div class="topbar-left">
+        <div>
+          <div class="topbar-logo">HMMWV<span> //</span> TM ASSIST</div>
+          <div class="topbar-sub">TM 9-2320-280 Series · RAG-Powered</div>
+        </div>
+        <div class="topbar-divider"></div>
+        <span class="spill {pcls}">
+          <span class="conn-dot {'online' if ok else 'offline'}"></span>{plabel}
+        </span>
+        <span class="spill {kb_cls}">📦 {kb_label}</span>
+        <span class="spill spill-info">🚛 {v_label}</span>
+      </div>
+      <div class="topbar-right">
+        <span class="spill spill-info">{m_label}</span>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
-# ── Quick Actions ──────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+# MODE SELECTOR
+# ═══════════════════════════════════════════════════════════════════════════
+
+def render_mode_selector():
+    """Render a styled tab bar for mode selection using Streamlit radio."""
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        mode_map = {"💬  Chat": "chat", "🔍  Diagnose": "diagnose", "📋  PMCS": "pmcs"}
+        selected = st.radio(
+            "mode_select",
+            list(mode_map.keys()),
+            horizontal=True,
+            label_visibility="collapsed",
+            key="_mode_radio",
+            index=list(mode_map.values()).index(st.session_state.mode)
+                  if st.session_state.mode in mode_map.values() else 0,
+        )
+        if mode_map[selected] != st.session_state.mode:
+            st.session_state.mode = mode_map[selected]
+            st.rerun()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# WELCOME SCREEN
+# ═══════════════════════════════════════════════════════════════════════════
+
+def render_welcome():
+    prov = st.session_state.provider
+    if prov == PROVIDER_OLLAMA:
+        pok   = AIEngine.check_ollama(st.session_state.ollama_url)
+        pdesc = f"Connected · `{st.session_state.ollama_model}`" if pok else "Start Ollama: `ollama serve`"
+    elif prov == PROVIDER_OPENAI:
+        pok   = bool(st.session_state.openai_url)
+        pdesc = f"`{st.session_state.openai_model}` via OpenAI-compatible endpoint" if pok else "Enter Base URL in sidebar"
+    elif prov == PROVIDER_ANTHROPIC:
+        pok   = bool(st.session_state.anthropic_api_key)
+        pdesc = f"Claude · `{st.session_state.anthropic_model}`" if pok else "Enter Anthropic API key in sidebar"
+    else:
+        pok = False; pdesc = "Select a provider in the sidebar"
+
+    has_data = get_vector_store().get_stats()["total_chunks"] > 0
+
+    step1_cls  = "done" if pok       else ""
+    step2_cls  = "done" if has_data  else ""
+    step3_cls  = "done" if (pok and has_data) else ""
+    s1_badge   = '<span class="step-badge done">✓ Ready</span>' if pok       else '<span class="step-badge pending">⬤ Pending</span>'
+    s2_badge   = '<span class="step-badge done">✓ Loaded</span>' if has_data  else '<span class="step-badge pending">⬤ Pending</span>'
+    s3_badge   = '<span class="step-badge done">✓ Ready</span>' if (pok and has_data) else '<span class="step-badge pending">⬤ Pending</span>'
+
+    st.markdown(f"""
+    <div class="welcome-wrap">
+      <div class="welcome-title">Welcome, Mechanic</div>
+      <div class="welcome-sub">
+        Your AI-powered HMMWV technical assistant. Upload official Technical Manuals,
+        then ask anything — maintenance procedures, torque specs, diagnostics, and PMCS checklists.
+        All answers are grounded in your TM library.
+      </div>
+      <div class="step-cards">
+        <div class="step-card {step1_cls}">
+          <div class="step-num">Step 01</div>
+          <span class="step-icon">🤖</span>
+          <div class="step-title">Configure AI Provider</div>
+          <div class="step-desc">{html_mod.escape(pdesc)}</div>
+          {s1_badge}
+        </div>
+        <div class="step-card {step2_cls}">
+          <div class="step-num">Step 02</div>
+          <span class="step-icon">📚</span>
+          <div class="step-title">Load Technical Manuals</div>
+          <div class="step-desc">Upload TM 9-2320-280 PDFs via the sidebar or drop them in <code>knowledge_base/</code></div>
+          {s2_badge}
+        </div>
+        <div class="step-card {step3_cls}">
+          <div class="step-num">Step 03</div>
+          <span class="step-icon">🔧</span>
+          <div class="step-title">Ask Away</div>
+          <div class="step-desc">Use the chat below, or pick a quick action to get started immediately.</div>
+          {s3_badge}
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# QUICK ACTIONS
+# ═══════════════════════════════════════════════════════════════════════════
 
 def render_quick_actions():
-    st.markdown("#### Quick Actions")
     actions = {
         "chat": [
-            ("🔧 Before-Ops PMCS", "Walk me through the complete Before-Operation PMCS checks for the HMMWV."),
-            ("🛢️ Oil Change", "Provide step-by-step instructions for performing an engine oil and filter change."),
-            ("🔋 Battery Service", "How do I properly inspect, service, and replace the HMMWV batteries?"),
-            ("🌀 CTIS Check", "Explain how to inspect and troubleshoot the Central Tire Inflation System."),
-            ("⚡ Glow Plug Test", "How do I test and replace the glow plugs on the 6.5L diesel engine?"),
-            ("🛞 Brake Bleed", "Provide the brake bleeding procedure for all four wheels."),
+            ("🔧", "Before-Ops PMCS",   "Walk me through the complete Before-Operation PMCS checks for the HMMWV."),
+            ("🛢️", "Oil Change",        "Provide step-by-step instructions for performing an engine oil and filter change."),
+            ("🔋", "Battery Service",   "How do I properly inspect, service, and replace the HMMWV batteries?"),
+            ("🌀", "CTIS Check",        "Explain how to inspect and troubleshoot the Central Tire Inflation System."),
+            ("⚡", "Glow Plug Test",    "How do I test and replace the glow plugs on the 6.5L diesel engine?"),
+            ("🛞", "Brake Bleed",       "Provide the brake bleeding procedure for all four wheels."),
         ],
         "diagnose": [
-            ("🌡️ Overheating", "The engine temperature gauge is reading high and coolant is bubbling in the surge tank."),
-            ("⚡ No Start", "The engine cranks but will not start. Batteries are fully charged."),
-            ("🔊 Grinding Noise", "Grinding/squealing noise from front left wheel area during braking."),
-            ("💨 White Smoke", "Excessive white smoke from exhaust, especially on cold starts."),
-            ("🛞 Pulling Right", "Vehicle pulls hard to the right during normal driving and braking."),
-            ("🔌 Electrical", "Multiple dash warning lights flickering and gauges are erratic."),
+            ("🌡️", "Overheating",      "The engine temperature gauge is reading high and coolant is bubbling in the surge tank."),
+            ("⚡", "No Start",          "The engine cranks but will not start. Batteries are fully charged."),
+            ("🔊", "Grinding Noise",    "Grinding/squealing noise from front left wheel area during braking."),
+            ("💨", "White Smoke",       "Excessive white smoke from exhaust, especially on cold starts."),
+            ("🛞", "Pulling Right",     "Vehicle pulls hard to the right during normal driving and braking."),
+            ("🔌", "Electrical Fault",  "Multiple dash warning lights flickering and gauges are erratic."),
         ],
         "pmcs": [
-            ("📋 Before-Ops", "Guide me through the Before-Operation PMCS checklist, step by step."),
-            ("📋 During-Ops", "Guide me through the During-Operation PMCS checks."),
-            ("📋 After-Ops", "Guide me through the After-Operation PMCS procedures."),
-            ("📋 Weekly", "What are the weekly scheduled maintenance checks?"),
-            ("📋 Monthly", "What are the monthly scheduled maintenance requirements?"),
-            ("📋 Semi-Annual", "Guide me through the semi-annual service requirements."),
+            ("📋", "Before-Ops",        "Guide me through the Before-Operation PMCS checklist, step by step."),
+            ("📋", "During-Ops",        "Guide me through the During-Operation PMCS checks."),
+            ("📋", "After-Ops",         "Guide me through the After-Operation PMCS procedures."),
+            ("📋", "Weekly",            "What are the weekly scheduled maintenance checks?"),
+            ("📋", "Monthly",           "What are the monthly scheduled maintenance requirements?"),
+            ("📋", "Semi-Annual",       "Guide me through the semi-annual service requirements."),
         ],
     }
     current = actions.get(st.session_state.mode, actions["chat"])
+
+    st.markdown('<div class="qa-section-label">▸ Quick Actions</div>', unsafe_allow_html=True)
     cols = st.columns(3)
-    for i, (label, prompt) in enumerate(current):
+    for i, (icon, label, prompt) in enumerate(current):
         with cols[i % 3]:
-            if st.button(label, use_container_width=True, key=f"qa_{i}"):
+            if st.button(f"{icon}  {label}", use_container_width=True, key=f"qa_{i}"):
                 return prompt
     return None
 
 
-# ── Source References ──────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+# SOURCE REFERENCES
+# ═══════════════════════════════════════════════════════════════════════════
 
 def render_sources(search_results: list):
     if not search_results or not st.session_state.get("show_sources", True):
         return
-    with st.expander("📑 Source References", expanded=False):
+
+    with st.expander(f"📑  Source References  ({len(search_results)})", expanded=False):
+        rows_html = ""
         for i, result in enumerate(search_results):
-            meta = result.get("metadata", {})
-            source = meta.get("source_file", "Unknown")
-            page = meta.get("page_number", "?")
-            distance = result.get("distance", 0)
-            relevance = max(0, (1 - distance)) * 100
-            safe_source = html_mod.escape(str(source))
-            st.markdown(
-                f"**Ref {i+1}** — `{safe_source}` page {page} (relevance: {relevance:.0f}%)"
-            )
-            st.caption(result["text"][:300] + ("…" if len(result["text"]) > 300 else ""))
+            meta      = result.get("metadata", {})
+            source    = html_mod.escape(str(meta.get("source_file", "Unknown")))
+            page      = meta.get("page_number", "?")
+            distance  = result.get("distance", 0)
+            relevance = max(0.0, 1.0 - distance) * 100
+            snippet   = html_mod.escape(result["text"][:220].replace("\n", " "))
+            bar_w     = f"{relevance:.0f}%"
 
-            pdf_path = KNOWLEDGE_BASE_DIR / source
-            if pdf_path.exists() and isinstance(page, int):
-                proc = get_pdf_processor()
-                img_path = proc.extract_page_as_image(pdf_path, page)
-                if img_path and Path(img_path).exists():
-                    st.image(img_path, caption=f"{safe_source} — Page {page}", use_container_width=True)
-            if i < len(search_results) - 1:
-                st.divider()
+            rows_html += f"""
+            <div class="src-ref-row">
+              <div class="src-ref-num">#{i+1}</div>
+              <div class="src-ref-meta">
+                <div class="src-ref-file">{source}</div>
+                <div class="src-ref-page">Page {page}</div>
+                <div class="src-ref-text">{snippet}{'…' if len(result['text']) > 220 else ''}</div>
+              </div>
+              <div class="relevance-bar">
+                <div class="relevance-val">{relevance:.0f}%</div>
+                <div class="relevance-track"><div class="relevance-fill" style="width:{bar_w}"></div></div>
+              </div>
+            </div>
+            """
 
+        st.markdown(f'<div class="src-panel">{rows_html}</div>', unsafe_allow_html=True)
 
-# ── Welcome Screen ─────────────────────────────────────────────────────────
-
-def render_welcome():
-    st.markdown("""
-    <div style="text-align:center; padding:2rem 1rem;">
-        <h2 style="color:var(--tan-light); font-family:'JetBrains Mono',monospace;">Welcome, Mechanic</h2>
-        <p style="color:var(--steel); max-width:600px; margin:0 auto; line-height:1.7;">
-            I'm your locally-powered HMMWV technical assistant.
-            I can help with maintenance procedures, troubleshooting, parts identification,
-            torque specs, and step-by-step repair instructions — all referenced from official TMs.
-        </p>
-    </div>""", unsafe_allow_html=True)
-
-    provider = st.session_state.provider
-    if provider == PROVIDER_OLLAMA:
-        provider_ok = AIEngine.check_ollama(st.session_state.ollama_url)
-        provider_step = (
-            f"Connected to `{st.session_state.ollama_model}`!"
-            if provider_ok
-            else "Start Ollama: `ollama serve` then `ollama pull gpt-oss:latest`"
-        )
-    elif provider == PROVIDER_OPENAI:
-        provider_ok = bool(st.session_state.openai_url)
-        provider_step = (
-            f"OpenAI-compatible: `{st.session_state.openai_model}` at `{st.session_state.openai_url}`"
-            if provider_ok
-            else "Enter your API Base URL in the sidebar."
-        )
-    elif provider == PROVIDER_ANTHROPIC:
-        provider_ok = bool(st.session_state.anthropic_api_key)
-        provider_step = (
-            f"Anthropic Claude: `{st.session_state.anthropic_model}` configured."
-            if provider_ok
-            else "Enter your Anthropic API key in the sidebar."
-        )
-    else:
-        provider_ok = False
-        provider_step = "Select a provider in the sidebar."
-
-    has_data = get_vector_store().get_stats()["total_chunks"] > 0
-    st.markdown("---")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.markdown(f"### {'✅' if provider_ok else '⬜'} Step 1: AI Provider\n{provider_step}")
-    with c2:
-        st.markdown(
-            f"### {'✅' if has_data else '⬜'} Step 2: Upload TMs\n"
-            f"{'Knowledge base loaded!' if has_data else 'Upload HMMWV Technical Manual PDFs in the sidebar.'}"
-        )
-    with c3:
-        st.markdown(
-            f"### {'✅' if provider_ok and has_data else '⬜'} Step 3: Ask Away\n"
-            f"{'Ready for queries!' if provider_ok and has_data else 'Complete steps 1-2 first.'}"
-        )
-    if provider_ok and has_data:
-        st.markdown("---")
-        st.markdown("### 🚀 Try a quick action below to get started:")
+        # Page image viewer
+        for result in search_results:
+            meta   = result.get("metadata", {})
+            source = meta.get("source_file", "")
+            page   = meta.get("page_number")
+            if source and isinstance(page, int):
+                pdf_path = KNOWLEDGE_BASE_DIR / source
+                if pdf_path.exists():
+                    proc     = get_pdf_processor()
+                    img_path = proc.extract_page_as_image(pdf_path, page)
+                    if img_path and Path(img_path).exists():
+                        with st.expander(f"🖼️  {html_mod.escape(source)} — Page {page}", expanded=False):
+                            st.image(img_path, use_container_width=True)
 
 
-# ── Print Helper ───────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+# PRINT BUTTON
+# ═══════════════════════════════════════════════════════════════════════════
 
 def render_print_button(content: str, msg_index: int, sources: list = None):
-    """Render a 🖨️ Print button that opens a print-friendly window with embedded page images."""
-    import base64
-
     proc = get_pdf_processor()
-
     source_html = ""
     if sources:
-        source_html = '<hr><h3 style="page-break-before:auto;">📑 Source References</h3>'
+        source_html = '<hr><h3>📑 Source References</h3>'
         for i, s in enumerate(sources, 1):
-            src = s.get("metadata", {}).get("source_file", "Unknown")
-            pg = s.get("metadata", {}).get("page_number", "?")
-            dist = s.get("distance", 0)
-            rel = max(0, (1 - dist)) * 100
-            text_preview = html_mod.escape(s.get("text", "")[:400])
-            safe_src = html_mod.escape(str(src))
-
+            src  = s.get("metadata", {}).get("source_file", "Unknown")
+            pg   = s.get("metadata", {}).get("page_number", "?")
+            rel  = max(0, 1 - s.get("distance", 0)) * 100
+            text = html_mod.escape(s.get("text", "")[:400])
+            ssrc = html_mod.escape(str(src))
             source_html += (
-                f'<div style="border:1px solid #ccc;border-radius:6px;padding:12px;margin:12px 0;'
-                f'page-break-inside:avoid;">'
-                f'<strong>Ref {i}</strong> — <code>{safe_src}</code> page {pg} '
-                f'(relevance: {rel:.0f}%)<br>'
-                f'<small style="color:#666;">{text_preview}…</small>'
+                f'<div style="border:1px solid #e0e0e0;border-radius:6px;padding:12px;margin:10px 0;">'
+                f'<strong>Ref {i}</strong> — <code>{ssrc}</code> p.{pg} '
+                f'<span style="color:#666;font-size:12px;">({rel:.0f}% relevant)</span><br>'
+                f'<small style="color:#555;">{text}…</small>'
             )
-
             if isinstance(pg, int):
-                pdf_path = KNOWLEDGE_BASE_DIR / src
-                if pdf_path.exists():
-                    img_path = proc.extract_page_as_image(pdf_path, pg)
-                    if img_path and Path(img_path).exists():
+                ppath = KNOWLEDGE_BASE_DIR / src
+                if ppath.exists():
+                    ipath = proc.extract_page_as_image(ppath, pg)
+                    if ipath and Path(ipath).exists():
                         try:
-                            with open(img_path, "rb") as imgf:
-                                img_b64 = base64.b64encode(imgf.read()).decode("ascii")
+                            with open(ipath, "rb") as f:
+                                b64 = base64.b64encode(f.read()).decode("ascii")
                             source_html += (
-                                f'<div style="margin-top:10px;text-align:center;">'
-                                f'<img src="data:image/png;base64,{img_b64}" '
+                                f'<div style="margin-top:8px;text-align:center;">'
+                                f'<img src="data:image/png;base64,{b64}" '
                                 f'style="max-width:100%;border:1px solid #ddd;border-radius:4px;" '
-                                f'alt="{safe_src} page {pg}"/>'
-                                f'<div style="font-size:11px;color:#888;margin-top:4px;">'
-                                f'{safe_src} — Page {pg}</div>'
-                                f'</div>'
+                                f'alt="{ssrc} p{pg}"/></div>'
                             )
                         except Exception:
                             pass
-
             source_html += '</div>'
 
-    variant = html_mod.escape(st.session_state.get("vehicle_variant", "") or "Any Variant")
+    variant   = html_mod.escape(st.session_state.get("vehicle_variant", "") or "All Variants")
     timestamp = time.strftime("%Y-%m-%d %H:%M")
-
-    md_b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
-    src_b64 = base64.b64encode(source_html.encode("utf-8")).decode("ascii")
+    md_b64    = base64.b64encode(content.encode()).decode("ascii")
+    src_b64   = base64.b64encode(source_html.encode()).decode("ascii")
 
     js = f"""
-    <button id="printBtn_{msg_index}" style="background:#2a3518;color:#c8a96e;border:1px solid #4a5a2b;
-        border-radius:6px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;
-        font-family:'JetBrains Mono',monospace;margin-top:6px;">
-        🖨️ Print This Response
+    <button id="pb_{msg_index}" style="
+      display:inline-flex;align-items:center;gap:6px;
+      background:transparent;border:1px solid #3a3d32;border-radius:6px;
+      padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;
+      font-family:'JetBrains Mono',monospace;color:#6b7b3a;
+      margin-top:4px;transition:all .18s ease;">
+      🖨️ Print
     </button>
     <script>
-    function b64utf8_{msg_index}(b64) {{
-        var raw = atob(b64);
-        var bytes = new Uint8Array(raw.length);
-        for (var i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    (function(){{
+      var btn = document.getElementById('pb_{msg_index}');
+      btn.onmouseenter = function(){{ this.style.background='rgba(75,83,32,.2)'; this.style.color='#8a9e4e'; }};
+      btn.onmouseleave = function(){{ this.style.background='transparent'; this.style.color='#6b7b3a'; }};
+      function dec(b64){{
+        var r=atob(b64),bytes=new Uint8Array(r.length);
+        for(var i=0;i<r.length;i++) bytes[i]=r.charCodeAt(i);
         return new TextDecoder('utf-8').decode(bytes);
-    }}
-    document.getElementById('printBtn_{msg_index}').addEventListener('click', function() {{
-        var md = b64utf8_{msg_index}("{md_b64}");
-        var srcB64 = "{src_b64}";
-        var w = window.open('', '_blank', 'width=800,height=900');
-        var doc = w.document;
-        doc.open();
-        doc.write('<html><head><meta charset="UTF-8"><title>HMMWV Tech Assistant</title>');
-        doc.write('<scr'+'ipt src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.6/marked.min.js"></scr'+'ipt>');
-        doc.write('<style>');
-        doc.write('body{{font-family:Segoe UI,Arial,sans-serif;max-width:750px;margin:0 auto;padding:20px;color:#1a1a1a;line-height:1.6}}');
-        doc.write('.hdr{{border-bottom:3px solid #4B5320;padding-bottom:12px;margin-bottom:20px}}');
-        doc.write('.hdr h1{{font-size:18px;color:#4B5320;margin:0}}.hdr .meta{{font-size:12px;color:#666;margin-top:4px}}');
-        doc.write('h2{{font-size:17px;color:#333}}h3{{font-size:15px;color:#444}}');
-        doc.write('code{{background:#f0f0f0;padding:2px 5px;border-radius:3px;font-size:13px}}');
-        doc.write('pre{{background:#f5f5f5;padding:12px;border-radius:6px;overflow-x:auto;border:1px solid #ddd}}');
-        doc.write('pre code{{background:none;padding:0}}');
-        doc.write('table{{border-collapse:collapse;width:100%;margin:10px 0}}th,td{{border:1px solid #ccc;padding:6px 10px;font-size:13px}}th{{background:#f0f0f0}}');
-        doc.write('blockquote{{border-left:3px solid #4B5320;padding-left:12px;color:#555}}strong{{color:#2a3518}}');
-        doc.write('img{{max-width:100%}}');
-        doc.write('@media print{{.noprint{{display:none}} img{{max-width:100%;page-break-inside:avoid}} div{{page-break-inside:avoid}}}}');
-        doc.write('</style></head><body>');
-        doc.write('<div class="hdr"><h1>🔧 HMMWV Technical Assistant</h1>');
-        doc.write('<div class="meta">Vehicle: {variant} &nbsp;|&nbsp; {timestamp}</div></div>');
-        doc.write('<div id="c"></div><div id="s"></div>');
-        doc.write('<br><button class="noprint" onclick="window.print()" style="padding:10px 24px;font-size:14px;cursor:pointer;background:#4B5320;color:white;border:none;border-radius:6px">🖨️ Print</button>');
-        doc.write('</body></html>');
-        doc.close();
-        w.onload = function() {{
-            w.document.getElementById('c').innerHTML = w.marked.parse(md);
-            var srcHtml = b64utf8_{msg_index}(srcB64);
-            w.document.getElementById('s').innerHTML = srcHtml;
+      }}
+      btn.onclick = function(){{
+        var md=dec("{md_b64}"), src=dec("{src_b64}");
+        var w=window.open('','_blank','width=820,height=950');
+        var d=w.document; d.open();
+        d.write('<!DOCTYPE html><html><head><meta charset="UTF-8">');
+        d.write('<title>HMMWV TM Assistant — Print</title>');
+        d.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.6/marked.min.js"><\\/script>');
+        d.write('<style>');
+        d.write('*{{box-sizing:border-box;margin:0;padding:0}}');
+        d.write('body{{font-family:Segoe UI,system-ui,sans-serif;color:#1a1a1a;background:#fff;max-width:780px;margin:0 auto;padding:24px}}');
+        d.write('.hdr{{border-bottom:3px solid #4B5320;padding-bottom:14px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:flex-end}}');
+        d.write('.hdr-title{{font-size:17px;font-weight:700;color:#2d3520;font-family:monospace;letter-spacing:1px}}');
+        d.write('.hdr-meta{{font-size:11px;color:#777;font-family:monospace}}');
+        d.write('.content{{line-height:1.65}}');
+        d.write('h1,h2,h3,h4{{color:#2d3520;margin:16px 0 8px;line-height:1.3}}');
+        d.write('h1{{font-size:20px;border-bottom:2px solid #e0e0e0;padding-bottom:6px}}');
+        d.write('h2{{font-size:17px}}h3{{font-size:15px}}');
+        d.write('p{{margin:8px 0}}ul,ol{{margin:8px 0 8px 22px}}li{{margin:4px 0}}');
+        d.write('code{{background:#f4f4f4;padding:1px 5px;border-radius:3px;font-size:12px;font-family:monospace}}');
+        d.write('pre{{background:#f5f5f5;padding:12px;border-radius:6px;border:1px solid #ddd;overflow-x:auto;margin:10px 0}}');
+        d.write('pre code{{background:none;padding:0;font-size:12px}}');
+        d.write('table{{border-collapse:collapse;width:100%;margin:12px 0}}');
+        d.write('th,td{{border:1px solid #ccc;padding:6px 10px;font-size:13px;text-align:left}}');
+        d.write('th{{background:#f0f0e8;font-weight:600;color:#2d3520}}');
+        d.write('blockquote{{border-left:3px solid #4B5320;padding:6px 12px;color:#555;background:#f9f9f4;margin:10px 0}}');
+        d.write('strong{{color:#2d3520}}');
+        d.write('img{{max-width:100%;border-radius:4px}}');
+        d.write('.print-btn{{display:flex;justify-content:center;margin-top:24px}}');
+        d.write('.print-btn button{{padding:10px 28px;font-size:14px;cursor:pointer;');
+        d.write('background:#4B5320;color:white;border:none;border-radius:6px;font-weight:600;letter-spacing:.5px}}');
+        d.write('@media print{{.print-btn{{display:none}}img{{page-break-inside:avoid}}}}');
+        d.write('<\\/style><\\/head><body>');
+        d.write('<div class="hdr">');
+        d.write('<div><div class="hdr-title">🔧 HMMWV Technical Assistant<\\/div>');
+        d.write('<div class="hdr-meta">Vehicle: {variant} &nbsp;·&nbsp; {timestamp}<\\/div><\\/div><\\/div>');
+        d.write('<div class="content" id="c"><\\/div>');
+        d.write('<div id="s"><\\/div>');
+        d.write('<div class="print-btn"><button onclick="window.print()">🖨️ Print \/ Save PDF<\\/button><\\/div>');
+        d.write('<\\/body><\\/html>');
+        d.close();
+        w.onload=function(){{
+          w.document.getElementById('c').innerHTML=w.marked.parse(md);
+          w.document.getElementById('s').innerHTML=src;
         }};
-    }});
+      }};
+    }})();
     </script>
     """
-    import streamlit.components.v1 as components
-    components.html(js, height=42)
+    components.html(js, height=38)
 
 
-# ── Chat ───────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+# CHAT
+# ═══════════════════════════════════════════════════════════════════════════
 
 def _stream_response(placeholder, ai: AIEngine, user_input: str,
                      search_results: list, history: list) -> str:
-    """Stream tokens from whichever mode is active; returns full response."""
     full = ""
-    if st.session_state.mode == "diagnose":
-        gen = ai.diagnose(
-            user_input,
-            search_results,
-            vehicle_variant=st.session_state.vehicle_variant,
-        )
-    else:
-        gen = ai.chat_stream(
-            user_input,
-            search_results,
-            conversation_history=history,
-            vehicle_variant=st.session_state.vehicle_variant,
-            maintenance_category=st.session_state.maintenance_category,
-        )
+    gen = ai.diagnose(user_input, search_results, vehicle_variant=st.session_state.vehicle_variant) \
+          if st.session_state.mode == "diagnose" else \
+          ai.chat_stream(user_input, search_results, conversation_history=history,
+                         vehicle_variant=st.session_state.vehicle_variant,
+                         maintenance_category=st.session_state.maintenance_category)
     for chunk in gen:
         full += chunk
         placeholder.markdown(full + "▌")
@@ -1651,20 +1756,27 @@ def _stream_response(placeholder, ai: AIEngine, user_input: str,
 
 
 def render_chat():
+    # Replay history
     for idx, msg in enumerate(st.session_state.messages):
-        with st.chat_message(msg["role"], avatar="🧑‍🔧" if msg["role"] == "user" else "🔧"):
+        avatar = "🧑‍🔧" if msg["role"] == "user" else "🔧"
+        with st.chat_message(msg["role"], avatar=avatar):
             st.markdown(msg["content"])
             if msg["role"] == "assistant":
-                if "sources" in msg:
+                col1, col2 = st.columns([8, 1])
+                with col2:
+                    render_print_button(msg["content"], idx, msg.get("sources", []))
+                if msg.get("sources"):
                     render_sources(msg["sources"])
-                render_print_button(msg["content"], idx, msg.get("sources", []))
 
+    # Input
     placeholders = {
-        "chat": "Describe the task you need to perform (e.g., 'Replace the fuel filter on an M1151')",
-        "diagnose": "Describe the symptoms (e.g., 'Engine overheating with white smoke')",
-        "pmcs": "Which PMCS check? (e.g., 'Before-operation checks')",
+        "chat":    "Describe the maintenance task (e.g. 'Replace fuel filter on M1151')…",
+        "diagnose":"Describe the symptoms (e.g. 'Engine overheating with white smoke')…",
+        "pmcs":    "Which PMCS interval? (e.g. 'Before-operation checks')…",
     }
     user_input = st.chat_input(placeholders.get(st.session_state.mode, placeholders["chat"]))
+
+    # Quick action can inject a prompt
     quick = render_quick_actions()
     if quick:
         user_input = quick
@@ -1674,31 +1786,33 @@ def render_chat():
         with st.chat_message("user", avatar="🧑‍🔧"):
             st.markdown(user_input)
 
-        vs = get_vector_store()
+        vs             = get_vector_store()
         search_results = vs.search(user_input, n_results=TOP_K_RESULTS)
-        history = [
-            {"role": m["role"], "content": m["content"]}
-            for m in st.session_state.messages[:-1][-12:]
-        ]
-        ai = get_ai_engine()
+        history        = [{"role": m["role"], "content": m["content"]}
+                          for m in st.session_state.messages[:-1][-12:]]
+        ai             = get_ai_engine()
 
         with st.chat_message("assistant", avatar="🔧"):
             placeholder = st.empty()
-            response = _stream_response(placeholder, ai, user_input, search_results, history)
+            response    = _stream_response(placeholder, ai, user_input, search_results, history)
+            col1, col2  = st.columns([8, 1])
+            with col2:
+                render_print_button(response, len(st.session_state.messages), search_results)
             render_sources(search_results)
 
         st.session_state.messages.append({
-            "role": "assistant",
-            "content": response,
-            "sources": search_results,
+            "role": "assistant", "content": response, "sources": search_results,
         })
 
 
-# ── Main ───────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+# MAIN
+# ═══════════════════════════════════════════════════════════════════════════
 
 def main():
     render_sidebar()
-    render_header()
+    render_topbar()
+    render_mode_selector()
     if not st.session_state.messages:
         render_welcome()
     render_chat()
