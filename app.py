@@ -1355,7 +1355,7 @@ def render_sidebar():
         unproc = status["unprocessed"]
         if unproc > 0:
             st.warning(f"{unproc} PDF(s) pending processing")
-            if st.button("⚙️ Process PDFs", use_container_width=True, type="primary"):
+            if st.button("⚙️ Process PDFs", width="stretch", type="primary"):
                 with st.spinner("Extracting text and images…"):
                     result = proc.process_all_pdfs()
                     if result["chunks"]:
@@ -1369,7 +1369,7 @@ def render_sidebar():
 
         if status["total_pdfs"] > 0:
             with st.expander("⚙️ Advanced"):
-                if st.button("♻️ Reprocess All", use_container_width=True):
+                if st.button("♻️ Reprocess All", width="stretch"):
                     with st.spinner("Reprocessing…"):
                         vs.clear()
                         result = proc.process_all_pdfs(force=True)
@@ -1389,7 +1389,7 @@ def render_sidebar():
                 )
 
         st.divider()
-        if st.button("🗑️ Clear Chat", use_container_width=True):
+        if st.button("🗑️ Clear Chat", width="stretch"):
             st.session_state.messages = []
             st.rerun()
 
@@ -1571,7 +1571,7 @@ def render_quick_actions():
     cols = st.columns(3)
     for i, (icon, label, prompt) in enumerate(current):
         with cols[i % 3]:
-            if st.button(f"{icon}  {label}", use_container_width=True, key=f"qa_{i}"):
+            if st.button(f"{icon}  {label}", width="stretch", key=f"qa_{i}"):
                 return prompt
     return None
 
@@ -1675,7 +1675,7 @@ def render_sources(search_results: list):
                     img_path = proc.extract_page_as_image(pdf_path, page)
                     if img_path and Path(img_path).exists():
                         with st.expander(f"🖼️  {html_mod.escape(source)} — Page {page}", expanded=False):
-                            st.image(img_path, use_container_width=True)
+                            st.image(img_path, width="stretch")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1954,7 +1954,7 @@ def render_inline_images(search_results: list):
         cols  = st.columns(len(batch))
         for col, (label, img_path) in zip(cols, batch):
             with col:
-                st.image(img_path, caption=label, use_container_width=True)
+                st.image(img_path, caption=label, width="stretch")
 
 
 def render_chat():
