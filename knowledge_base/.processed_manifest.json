@@ -1,0 +1,230 @@
+{
+  "tm-10-5411-205-13.pdf": {
+    "hash": "eace084f1995e63467fc7dd49674f590",
+    "num_chunks": 123,
+    "num_images": 45,
+    "num_pages": 127
+  },
+  "tm-10-5411-231-13-p.pdf": {
+    "hash": "116a3a081d31d1068df5523d068d4092",
+    "num_chunks": 107,
+    "num_images": 20,
+    "num_pages": 128
+  },
+  "tm-55-2320-280-14.pdf": {
+    "hash": "96aaa26c50e73ee455a9dde11c34355c",
+    "num_chunks": 43,
+    "num_images": 24,
+    "num_pages": 44
+  },
+  "tm-9-2320-280-10-hr.pdf": {
+    "hash": "7a54b29bb26b84eb80c47e9404cc3b04",
+    "num_chunks": 21,
+    "num_images": 0,
+    "num_pages": 22
+  },
+  "tm-9-2320-280-10.pdf": {
+    "hash": "e30b9c15949b28b5405b800ed1fd59ef",
+    "num_chunks": 404,
+    "num_images": 283,
+    "num_pages": 405
+  },
+  "tm-9-2320-280-20-1.pdf": {
+    "hash": "d0cd1f15e0f7ac1179ee03214b507acb",
+    "num_chunks": 889,
+    "num_images": 466,
+    "num_pages": 890
+  },
+  "tm-9-2320-280-20-2.pdf": {
+    "hash": "acf545d3623ff03279b7bccbe9af958d",
+    "num_chunks": 952,
+    "num_images": 756,
+    "num_pages": 953
+  },
+  "tm-9-2320-280-20-3.pdf": {
+    "hash": "195790964ba92e2fbd11e958702aadc7",
+    "num_chunks": 1168,
+    "num_images": 890,
+    "num_pages": 1170
+  },
+  "tm-9-2320-280-24p-1.pdf": {
+    "hash": "2d5c6802dae6106b98bbf687ce8972fa",
+    "num_chunks": 1008,
+    "num_images": 355,
+    "num_pages": 1139
+  },
+  "tm-9-2320-280-24p-2.pdf": {
+    "hash": "45a2419ae41705acae3b669505a8e600",
+    "num_chunks": 940,
+    "num_images": 189,
+    "num_pages": 1017
+  },
+  "tm-9-2320-280-34.pdf": {
+    "hash": "de8d9fd00791f698380bc0c8306fb792",
+    "num_chunks": 1248,
+    "num_images": 1055,
+    "num_pages": 1258
+  },
+  "tm-9-2320-362-14-p.pdf": {
+    "hash": "54f06575d4332fa275dc5a28f5596663",
+    "num_chunks": 328,
+    "num_images": 137,
+    "num_pages": 353
+  },
+  "tm-9-2320-387-10.pdf": {
+    "hash": "e4a0284e748d72bc69712a6291b98484",
+    "num_chunks": 277,
+    "num_images": 108,
+    "num_pages": 277
+  },
+  "tm-9-2320-387-24-1.pdf": {
+    "hash": "606080144128a1f47e9967e925e1ec0b",
+    "num_chunks": 1188,
+    "num_images": 216,
+    "num_pages": 1205
+  },
+  "tm-9-2320-387-24-2.pdf": {
+    "hash": "fabda0da1c7c18371c69def3633d605a",
+    "num_chunks": 1485,
+    "num_images": 805,
+    "num_pages": 1555
+  },
+  "tm-9-2320-387-24p.pdf": {
+    "hash": "407c6cfc09d2270ab2075b2cf3c224ab",
+    "num_chunks": 1274,
+    "num_images": 436,
+    "num_pages": 1367
+  },
+  "tm-9-2815-237-34.pdf": {
+    "hash": "c22d4ee8ee418b500d3c3d57aa06bc4c",
+    "num_chunks": 270,
+    "num_images": 213,
+    "num_pages": 272
+  },
+  "tm-9-2815-237-34p.pdf": {
+    "hash": "335f0f5a48cb0dbc07366953eed07af9",
+    "num_chunks": 148,
+    "num_images": 39,
+    "num_pages": 165
+  },
+  "tm-9-2920-225-34.pdf": {
+    "hash": "0722f7a4797ec55d5c05a954360bfdcf",
+    "num_chunks": 261,
+    "num_images": 254,
+    "num_pages": 263
+  },
+  "tm-9-2920-225-34p.pdf": {
+    "hash": "6050d795d334b6f2b6f0086ac0de1504",
+    "num_chunks": 17,
+    "num_images": 11,
+    "num_pages": 18
+  },
+  "Basic-Humvee-Parts-Book-1.pdf": {
+    "hash": "22fb3624732d07fe021791ffd1b06af4",
+    "num_chunks": 1009,
+    "num_images": 355,
+    "num_pages": 1146
+  },
+  "Humvee-Operators-Manual.pdf": {
+    "hash": "2a3b8144a7e1774feb44b6c7f95caa0c",
+    "num_chunks": 420,
+    "num_images": 281,
+    "num_pages": 420
+  },
+  "Humvee-Service-1.pdf": {
+    "hash": "5cb44213a28789ff81d9ab6e9a128954",
+    "num_chunks": 888,
+    "num_images": 466,
+    "num_pages": 889
+  },
+  "Humvee-Service-2.pdf": {
+    "hash": "9c304f291747d1d3b4536a9a6c539568",
+    "num_chunks": 952,
+    "num_images": 756,
+    "num_pages": 953
+  },
+  "Humvee-Service-3.pdf": {
+    "hash": "31bea57768f191e492440bf6e4604b0c",
+    "num_chunks": 1167,
+    "num_images": 890,
+    "num_pages": 1169
+  },
+  "mwo-9-2320-280-20-1.pdf": {
+    "hash": "bb26abb59e8d960ce17f4c3a5cbfb557",
+    "num_chunks": 14,
+    "num_images": 1,
+    "num_pages": 14
+  },
+  "mwo-9-2320-280-20-4.pdf": {
+    "hash": "25e6a39ce057fe0c2370d1ea71d0e0d1",
+    "num_chunks": 13,
+    "num_images": 7,
+    "num_pages": 13
+  },
+  "mwo-9-2320-280-20-6.pdf": {
+    "hash": "8153495637ab6ef9b3f6469f5deb9c7d",
+    "num_chunks": 18,
+    "num_images": 354,
+    "num_pages": 18
+  },
+  "mwo-9-2320-280-35-1.pdf": {
+    "hash": "aefc148cfbb2a71b47910196c160b7cb",
+    "num_chunks": 20,
+    "num_images": 1,
+    "num_pages": 20
+  },
+  "mwo-9-2320-280-35-2.pdf": {
+    "hash": "3261fca691df9ef0625de24074900455",
+    "num_chunks": 114,
+    "num_images": 79,
+    "num_pages": 116
+  },
+  "mwo-9-2320-387-20-1.pdf": {
+    "hash": "20c8e4eaa287c56350bb1356371d77ed",
+    "num_chunks": 44,
+    "num_images": 2459,
+    "num_pages": 44
+  },
+  "tb-9-2320-280-35-12.pdf": {
+    "hash": "4cb50e6fb91548abf232340472e5086a",
+    "num_chunks": 151,
+    "num_images": 196,
+    "num_pages": 162
+  },
+  "tb-9-2320-280-35-13.pdf": {
+    "hash": "35dc4c6a9fb4e6d0eb8eeab65ecd8f51",
+    "num_chunks": 138,
+    "num_images": 166,
+    "num_pages": 148
+  },
+  "tb-9-2320-280-35-14.pdf": {
+    "hash": "aa713dd1a55452000820d991324de0f2",
+    "num_chunks": 137,
+    "num_images": 174,
+    "num_pages": 148
+  },
+  "tb-9-2320-280-35-15.pdf": {
+    "hash": "5c06dcaa5b2aa58c23bae16fff2ba8c8",
+    "num_chunks": 159,
+    "num_images": 174,
+    "num_pages": 168
+  },
+  "tb-9-2320-335-13-p.pdf": {
+    "hash": "334fd41e4f98876e33d33054ef270211",
+    "num_chunks": 606,
+    "num_images": 458,
+    "num_pages": 680
+  },
+  "tb-9-2510-251-13.pdf": {
+    "hash": "6be0b4d674f6fcac72d401314a0356c1",
+    "num_chunks": 578,
+    "num_images": 462,
+    "num_pages": 624
+  },
+  "tb-9-2510-251-24.pdf": {
+    "hash": "369022eddef28ed7c59bc630c3e4bcf7",
+    "num_chunks": 173,
+    "num_images": 109,
+    "num_pages": 212
+  }
+}
