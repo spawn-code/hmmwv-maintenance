@@ -1798,17 +1798,163 @@ def render_print_button(content: str, msg_index: int, sources: list = None):
 
 def _stream_response(placeholder, ai: AIEngine, user_input: str,
                      search_results: list, history: list) -> str:
-    full = ""
-    gen = ai.diagnose(user_input, search_results, vehicle_variant=st.session_state.vehicle_variant) \
-          if st.session_state.mode == "diagnose" else \
-          ai.chat_stream(user_input, search_results, conversation_history=history,
-                         vehicle_variant=st.session_state.vehicle_variant,
-                         maintenance_category=st.session_state.maintenance_category)
+    """Stream tokens from AI with a live progress bar and ETA estimate."""
+
+    # ── Phase timings (seconds) used for ETA estimation ──────────────────
+    # We observe real elapsed time per phase and blend with these priors.
+    PHASE_ESTIMATE = {
+        "context":    0.3,
+        "first_token": 3.0,   # time until first token arrives
+        "generation": 20.0,   # median full response time
+    }
+
+    t0 = time.monotonic()
+
+    # Progress slots — placed ABOVE the response placeholder
+    progress_slot = st.empty()
+
+    def _show(pct, label, estimate=None):
+        elapsed = time.monotonic() - t0
+        bar_html = _build_progress_html(pct, label, elapsed, estimate)
+        progress_slot.markdown(bar_html, unsafe_allow_html=True)
+
+    # ── Phase 1: context ready (search already done before this call) ─────
+    _show(0.08, "🔍 Searching knowledge base…", PHASE_ESTIMATE["context"])
+    time.sleep(0.15)   # tiny visual pause so the bar is visible
+    _show(0.20, "📋 Preparing context…",        PHASE_ESTIMATE["context"])
+    time.sleep(0.15)
+
+    # ── Phase 2: connect to AI and wait for first token ───────────────────
+    _show(0.28, "🤖 Connecting to AI engine…", PHASE_ESTIMATE["first_token"])
+
+    gen = (
+        ai.diagnose(user_input, search_results,
+                    vehicle_variant=st.session_state.vehicle_variant)
+        if st.session_state.mode == "diagnose"
+        else ai.chat_stream(user_input, search_results,
+                            conversation_history=history,
+                            vehicle_variant=st.session_state.vehicle_variant,
+                            maintenance_category=st.session_state.maintenance_category)
+    )
+
+    full        = ""
+    token_count = 0
+    t_first     = None
+
     for chunk in gen:
-        full += chunk
+        full        += chunk
+        token_count += 1
+
+        if t_first is None:
+            t_first = time.monotonic()
+            _show(0.38, "✍️  Generating response…", PHASE_ESTIMATE["generation"])
+
+        # Smooth progress: ramp from 38 → 92 using a log curve on token count
+        # Most HMMWV responses are 300-800 tokens; cap visual at 92% until done
+        progress = 0.38 + 0.54 * min(1.0, math.log1p(token_count) / math.log1p(600))
+        elapsed  = time.monotonic() - (t_first or t0)
+        estimate = PHASE_ESTIMATE["generation"]
+        _show(progress, f"✍️  Generating response… ({token_count} tokens)", estimate)
+
         placeholder.markdown(full + "▌")
+
+    # ── Phase 3: done ─────────────────────────────────────────────────────
+    total_elapsed = time.monotonic() - t0
+    _show(1.0, f"✅ Complete — {token_count} tokens in {total_elapsed:.1f}s", None)
     placeholder.markdown(full)
+
+    # Fade out the progress bar after a short pause
+    time.sleep(1.8)
+    progress_slot.empty()
+
     return full
+
+
+def _build_progress_html(pct: float, label: str, elapsed: float,
+                          estimate: float | None) -> str:
+    """Return self-contained HTML for the progress bar (used by _stream_response)."""
+    pct_int  = int(min(pct * 100, 100))
+    color    = "#2e7d32" if pct >= 1.0 else "#5c7a30"
+    fill_bg  = f"linear-gradient(90deg,{color},#8ab840)" if pct < 1.0 else "#2e7d32"
+    pulse    = "" if pct >= 1.0 else "animation:pulse 1s infinite"
+    dot_col  = "#2e7d32" if pct >= 1.0 else "#5c7a30"
+    eta_html = ""
+    if estimate and pct < 1.0:
+        remaining = max(0.0, estimate - elapsed)
+        if remaining > 0.5:
+            eta_html = f'<span style="color:#7a8070;font-size:11px;font-style:italic">~{remaining:.0f}s remaining</span>'
+        else:
+            eta_html = '<span style="color:#5c7a30;font-size:11px;font-style:italic">almost done…</span>'
+    return f"""
+<div style="font-family:system-ui,sans-serif;padding:8px 0 4px">
+  <div style="display:flex;justify-content:space-between;align-items:center;
+              font-size:12px;color:#3a4030;margin-bottom:6px;font-weight:500">
+    <span style="display:flex;align-items:center;gap:7px">
+      <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
+                   background:{dot_col};{pulse}"></span>
+      {label}
+    </span>
+    {eta_html}
+  </div>
+  <div style="height:6px;background:#e0e4d8;border-radius:3px;overflow:hidden">
+    <div style="height:100%;width:{pct_int}%;border-radius:3px;
+                background:{fill_bg};transition:width .25s ease"></div>
+  </div>
+</div>
+<style>@keyframes pulse{{0%,100%{{opacity:1;transform:scale(1)}}50%{{opacity:.35;transform:scale(.75)}}}}</style>
+"""
+
+
+def render_inline_images(search_results: list):
+    """
+    Show page images from search_results directly below the response.
+    Deduplicated by (source_file, page_number) so the same page appears once.
+    Only shown when the assistant response contains step-by-step content
+    (detected by numbered list or 'Step' headers in the markdown).
+    Images are shown in a compact horizontal strip with captions.
+    """
+    if not search_results:
+        return
+
+    proc = get_pdf_processor()
+    seen: set = set()
+    image_items: list = []   # list of (label, img_path)
+
+    for result in search_results:
+        meta   = result.get("metadata", {})
+        source = meta.get("source_file", "")
+        page   = meta.get("page_number")
+        if not source or not isinstance(page, int):
+            continue
+        key = (source, page)
+        if key in seen:
+            continue
+        seen.add(key)
+        pdf_path = KNOWLEDGE_BASE_DIR / source
+        if not pdf_path.exists():
+            continue
+        img_path = proc.extract_page_as_image(pdf_path, page)
+        if img_path and Path(img_path).exists():
+            label = f"📄 {source}  —  p.{page}"
+            image_items.append((label, img_path))
+
+    if not image_items:
+        return
+
+    st.markdown(
+        "<div style='font-size:12px;font-weight:600;color:#5c7a30;"
+        "margin:10px 0 6px;letter-spacing:.4px'>📷 REFERENCE PAGES</div>",
+        unsafe_allow_html=True,
+    )
+
+    # Layout: up to 3 images per row
+    cols_per_row = min(3, len(image_items))
+    for row_start in range(0, len(image_items), cols_per_row):
+        batch = image_items[row_start: row_start + cols_per_row]
+        cols  = st.columns(len(batch))
+        for col, (label, img_path) in zip(cols, batch):
+            with col:
+                st.image(img_path, caption=label, use_container_width=True)
 
 
 def render_chat():
@@ -1822,6 +1968,7 @@ def render_chat():
                 with col2:
                     render_print_button(msg["content"], idx, msg.get("sources", []))
                 if msg.get("sources"):
+                    render_inline_images(msg["sources"])
                     render_sources(msg["sources"])
 
     # Input
@@ -1854,6 +2001,7 @@ def render_chat():
             col1, col2  = st.columns([8, 1])
             with col2:
                 render_print_button(response, len(st.session_state.messages), search_results)
+            render_inline_images(search_results)
             render_sources(search_results)
 
         st.session_state.messages.append({
