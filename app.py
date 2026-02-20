@@ -20,6 +20,7 @@ import math
 import re
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections import Counter
 from pathlib import Path
@@ -150,6 +151,9 @@ def _default_settings() -> dict:
         "openai_api_key": "",
         "anthropic_api_key": "",
         "anthropic_model": ANTHROPIC_DEFAULT_MODEL,
+        "youtube_api_key": "",
+        "youtube_enabled": True,
+        "youtube_max_results": 3,
     }
 
 def load_settings() -> dict:
@@ -1150,8 +1154,11 @@ def init_session():
         st.session_state.openai_url        = saved["openai_url"]
         st.session_state.openai_model      = saved["openai_model"]
         st.session_state.openai_api_key    = saved["openai_api_key"]
-        st.session_state.anthropic_api_key = saved["anthropic_api_key"]
-        st.session_state.anthropic_model   = saved["anthropic_model"]
+        st.session_state.anthropic_api_key  = saved["anthropic_api_key"]
+        st.session_state.anthropic_model    = saved["anthropic_model"]
+        st.session_state.youtube_api_key    = saved.get("youtube_api_key", "")
+        st.session_state.youtube_enabled    = saved.get("youtube_enabled", True)
+        st.session_state.youtube_max_results = saved.get("youtube_max_results", 3)
 
     for k, v in {
         "messages": [], "vehicle_variant": "", "maintenance_category": "",
@@ -1187,6 +1194,9 @@ def _collect_settings() -> dict:
         "openai_api_key": st.session_state.openai_api_key,
         "anthropic_api_key": st.session_state.anthropic_api_key,
         "anthropic_model": st.session_state.anthropic_model,
+        "youtube_api_key": st.session_state.get("youtube_api_key", ""),
+        "youtube_enabled": st.session_state.get("youtube_enabled", True),
+        "youtube_max_results": st.session_state.get("youtube_max_results", 3),
     }
 
 def get_ai_engine() -> AIEngine:
@@ -1387,6 +1397,34 @@ def render_sidebar():
                     f'<div class="src-chip"><span class="src-chip-icon">📄</span>{safe}</div>',
                     unsafe_allow_html=True,
                 )
+
+        # YouTube video search
+        st.divider()
+        _sb_label("▶", "YOUTUBE VIDEOS")
+        yt_enabled = st.toggle(
+            "Search YouTube for related videos",
+            value=st.session_state.get("youtube_enabled", True),
+            key="youtube_enabled",
+        )
+        if yt_enabled:
+            yt_key = st.text_input(
+                "YouTube Data API v3 Key",
+                value=st.session_state.get("youtube_api_key", ""),
+                type="password",
+                placeholder="AIza…",
+                label_visibility="collapsed",
+                help="Get a free key at console.cloud.google.com → YouTube Data API v3",
+            )
+            if yt_key != st.session_state.get("youtube_api_key", ""):
+                st.session_state.youtube_api_key = yt_key
+                save_settings(_collect_settings())
+            yt_n = st.slider(
+                "Max videos", min_value=1, max_value=6,
+                value=st.session_state.get("youtube_max_results", 3),
+                key="youtube_max_results",
+            )
+            if not st.session_state.get("youtube_api_key"):
+                st.caption("⚠️ Add an API key to enable video search.")
 
         st.divider()
         if st.button("🗑️ Clear Chat", width="stretch"):
@@ -1793,6 +1831,200 @@ def render_print_button(content: str, msg_index: int, sources: list = None):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# YOUTUBE SEARCH
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _yt_build_query(user_input: str, vehicle_variant: str) -> str:
+    """Build a focused YouTube search query from the user's question."""
+    # Strip bracket metadata from variant (e.g. "M998 — Cargo/Troop Carrier" → "M998")
+    variant_tag = ""
+    if vehicle_variant:
+        variant_tag = vehicle_variant.split("—")[0].strip()
+    base = user_input.strip()
+    # Limit length for URL safety
+    if len(base) > 120:
+        base = base[:120]
+    parts = ["HMMWV"]
+    if variant_tag and variant_tag not in base:
+        parts.append(variant_tag)
+    parts.append(base)
+    return " ".join(parts)
+
+
+def search_youtube(user_input: str, vehicle_variant: str = "",
+                   api_key: str = "", max_results: int = 3) -> list:
+    """
+    Search YouTube for HMMWV maintenance videos related to the query.
+    Uses the YouTube Data API v3 when an API key is provided.
+    Returns a list of dicts: {title, url, thumbnail, channel, video_id}.
+    """
+    if not api_key:
+        return []
+
+    query = _yt_build_query(user_input, vehicle_variant)
+    encoded_q = urllib.parse.quote(query)
+    api_url = (
+        "https://www.googleapis.com/youtube/v3/search"
+        f"?part=snippet&type=video&maxResults={max_results}"
+        f"&q={encoded_q}&relevanceLanguage=en&safeSearch=strict"
+        f"&key={api_key}"
+    )
+
+    try:
+        req = urllib.request.Request(
+            api_url,
+            headers={"Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode()
+        except Exception:
+            pass
+        logger.warning(f"YouTube API HTTP {e.code}: {body[:200]}")
+        return []
+    except Exception as e:
+        logger.warning(f"YouTube search failed: {e}")
+        return []
+
+    videos = []
+    for item in data.get("items", []):
+        vid_id  = item.get("id", {}).get("videoId", "")
+        snippet = item.get("snippet", {})
+        if not vid_id:
+            continue
+        # Pick best available thumbnail
+        thumbs = snippet.get("thumbnails", {})
+        thumb  = (thumbs.get("medium") or thumbs.get("default") or {}).get("url", "")
+        videos.append({
+            "video_id":  vid_id,
+            "title":     snippet.get("title", "Untitled"),
+            "channel":   snippet.get("channelTitle", ""),
+            "published": snippet.get("publishedAt", "")[:10],
+            "thumbnail": thumb,
+            "url":       f"https://www.youtube.com/watch?v={vid_id}",
+        })
+    return videos
+
+
+def render_youtube_videos(videos: list, query: str = ""):
+    """Render a styled card grid of YouTube search results."""
+    if not videos:
+        return
+
+    # Section header
+    st.markdown(
+        "<div style='font-size:12px;font-weight:600;color:#c62828;"
+        "margin:14px 0 8px;letter-spacing:.4px'>▶ RELATED VIDEOS</div>",
+        unsafe_allow_html=True,
+    )
+
+    cards_html = ""
+    for v in videos:
+        title   = html_mod.escape(v["title"])
+        channel = html_mod.escape(v["channel"])
+        pub     = html_mod.escape(v["published"])
+        url     = html_mod.escape(v["url"])
+        thumb   = html_mod.escape(v["thumbnail"])
+        thumb_html = (
+            f'<img src="{thumb}" alt="thumbnail" '
+            f'style="width:100%;height:100%;object-fit:cover;display:block;">'
+            if thumb else
+            '<div style="width:100%;height:100%;background:#e0e4d8;'
+            'display:flex;align-items:center;justify-content:center;'
+            'font-size:28px;">▶</div>'
+        )
+        cards_html += f"""
+        <a href="{url}" target="_blank" style="text-decoration:none;color:inherit">
+          <div class="yt-card">
+            <div class="yt-thumb">
+              {thumb_html}
+              <div class="yt-play-overlay">▶</div>
+            </div>
+            <div class="yt-meta">
+              <div class="yt-title">{title}</div>
+              <div class="yt-channel">📺 {channel}</div>
+              <div class="yt-date">{pub}</div>
+            </div>
+          </div>
+        </a>
+        """
+
+    panel_html = f"""
+    <style>
+      .yt-grid {{
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 12px;
+        margin: 4px 0 8px;
+      }}
+      .yt-card {{
+        border: 1px solid #d0d5c8;
+        border-radius: 8px;
+        overflow: hidden;
+        background: #ffffff;
+        transition: transform .15s, box-shadow .15s;
+        cursor: pointer;
+      }}
+      .yt-card:hover {{
+        transform: translateY(-2px);
+        box-shadow: 0 4px 16px rgba(0,0,0,.12);
+        border-color: #c62828;
+      }}
+      .yt-thumb {{
+        position: relative;
+        width: 100%;
+        padding-top: 56.25%;   /* 16:9 */
+        overflow: hidden;
+        background: #1a1a1a;
+      }}
+      .yt-thumb img, .yt-thumb > div {{
+        position: absolute;
+        top: 0; left: 0;
+        width: 100%; height: 100%;
+      }}
+      .yt-play-overlay {{
+        position: absolute;
+        top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        width: 40px; height: 40px;
+        background: rgba(198,40,40,.85);
+        border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        color: white; font-size: 16px;
+        opacity: 0; transition: opacity .15s;
+      }}
+      .yt-card:hover .yt-play-overlay {{ opacity: 1; }}
+      .yt-meta {{
+        padding: 8px 10px 10px;
+      }}
+      .yt-title {{
+        font-family: system-ui, sans-serif;
+        font-size: 12px; font-weight: 600;
+        color: #1e2318; line-height: 1.35;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        margin-bottom: 4px;
+      }}
+      .yt-channel {{
+        font-size: 11px; color: #5a6050;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }}
+      .yt-date {{
+        font-size: 10px; color: #7a8070; margin-top: 2px;
+        font-family: 'JetBrains Mono', monospace;
+      }}
+    </style>
+    <div class="yt-grid">{cards_html}</div>
+    """
+    components.html(panel_html, height=280, scrolling=False)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # CHAT
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -1970,6 +2202,8 @@ def render_chat():
                 if msg.get("sources"):
                     render_inline_images(msg["sources"])
                     render_sources(msg["sources"])
+                if msg.get("videos"):
+                    render_youtube_videos(msg["videos"])
 
     # Input
     placeholders = {
@@ -2004,8 +2238,23 @@ def render_chat():
             render_inline_images(search_results)
             render_sources(search_results)
 
+            # YouTube video search (runs after AI response is complete)
+            yt_videos = []
+            if st.session_state.get("youtube_enabled", True) and \
+               st.session_state.get("youtube_api_key", ""):
+                with st.spinner("🎬 Searching YouTube for related videos…"):
+                    yt_videos = search_youtube(
+                        user_input,
+                        vehicle_variant=st.session_state.vehicle_variant,
+                        api_key=st.session_state.youtube_api_key,
+                        max_results=st.session_state.get("youtube_max_results", 3),
+                    )
+            if yt_videos:
+                render_youtube_videos(yt_videos, query=user_input)
+
         st.session_state.messages.append({
-            "role": "assistant", "content": response, "sources": search_results,
+            "role": "assistant", "content": response,
+            "sources": search_results, "videos": yt_videos,
         })
 
 
