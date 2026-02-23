@@ -55,11 +55,16 @@ ALL_PROVIDERS      = [PROVIDER_OLLAMA, PROVIDER_OPENAI, PROVIDER_ANTHROPIC]
 
 MAX_TOKENS    = 4096
 TEMPERATURE   = 0.2
-CHUNK_SIZE    = 1000
-CHUNK_OVERLAP = 200
+CHUNK_SIZE    = 700    # smaller → tighter, more focused chunks
+CHUNK_OVERLAP = 150    # proportional overlap
 TOP_K_RESULTS = 8
 COLLECTION_NAME = "hmmwv_manuals"
 MIN_IMAGE_SIZE  = (100, 100)
+
+# BM25 retrieval parameters
+BM25_K1        = 1.5   # term-frequency saturation
+BM25_B         = 0.75  # document-length normalisation
+MIN_SIMILARITY = 0.08  # normalised BM25 score floor — results below this are noise
 
 HMMWV_VARIANTS = [
     "M998 — Cargo/Troop Carrier",
@@ -182,6 +187,113 @@ def save_settings(settings: dict):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# QUERY EXPANSION — HMMWV DOMAIN SYNONYMS
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Maps common user phrasing to HMMWV TM terminology.
+# Keys are lower-case substrings to detect in the query;
+# values are additional tokens injected before BM25 search.
+_HMMWV_SYNONYMS: dict[str, list[str]] = {
+    # Starting / cranking
+    "won't start":    ["no crank", "fails start", "dead", "starter", "ignition", "cranking"],
+    "wont start":     ["no crank", "fails start", "dead", "starter", "ignition"],
+    "no start":       ["crank", "starter", "ignition", "battery", "fuel"],
+    "hard start":     ["crank", "cold start", "glow plug", "fuel pressure"],
+    "crank":          ["starter", "solenoid", "battery", "ignition", "turnover"],
+    "starter":        ["solenoid", "crank", "ignition", "battery", "armature"],
+    # Engine
+    "engine":         ["motor", "powerplant", "diesel", "6.2", "6.5"],
+    "overheating":    ["coolant", "thermostat", "radiator", "temperature", "hot"],
+    "overheat":       ["coolant", "thermostat", "radiator", "temperature"],
+    "knock":          ["ping", "preignition", "bearing", "rod", "piston"],
+    "smoke":          ["exhaust", "burning", "blow-by", "rings", "turbo"],
+    "idle":           ["rough idle", "rpm", "governor", "injector"],
+    # Fuel
+    "fuel":           ["diesel", "injection", "injector", "pump", "filter", "line"],
+    "injector":       ["fuel injection", "nozzle", "spray", "tip"],
+    "fuel pump":      ["lift pump", "transfer pump", "injection pump"],
+    "filter":         ["filtration", "strainer", "element", "primary", "secondary"],
+    # Cooling
+    "coolant":        ["antifreeze", "water", "radiator", "overflow", "hose"],
+    "radiator":       ["coolant", "cooling system", "hose", "cap", "flush"],
+    "thermostat":     ["coolant temperature", "cooling", "overheat"],
+    # Oil / lubrication
+    "oil":            ["lubricant", "lube", "engine oil", "crankcase", "sump"],
+    "oil leak":       ["seal", "gasket", "o-ring", "pan", "drain plug"],
+    "oil pressure":   ["pump", "gauge", "sender", "relief valve"],
+    # Electrical
+    "battery":        ["batteries", "charge", "charging", "dead", "voltage", "24 volt"],
+    "alternator":     ["charging", "voltage regulator", "belt", "generator"],
+    "electrical":     ["wiring", "harness", "fuse", "relay", "circuit", "voltage"],
+    "fuse":           ["circuit breaker", "electrical", "relay", "short"],
+    # Brakes
+    "brake":          ["brakes", "braking", "pedal", "caliper", "rotor", "drum", "booster"],
+    "brake fluid":    ["dot 3", "hydraulic fluid", "master cylinder", "caliper"],
+    # Steering
+    "steering":       ["steer", "power steering", "pump", "gear box", "tie rod", "wheel"],
+    "wanders":        ["alignment", "tie rod", "steering", "caster", "camber"],
+    # Drivetrain
+    "transmission":   ["trans", "gearbox", "shifting", "gear", "automatic", "allison"],
+    "transfer case":  ["4wd", "four wheel drive", "4x4", "t-case", "selector"],
+    "differential":   ["diff", "axle", "gear oil", "spider gear", "ring gear"],
+    "driveshaft":     ["u-joint", "universal joint", "propeller shaft", "vibration"],
+    "axle":           ["differential", "hub", "spindle", "bearing", "seal"],
+    # Suspension / steering
+    "suspension":     ["shock", "absorber", "spring", "control arm", "ball joint"],
+    "vibration":      ["balance", "u-joint", "driveshaft", "wheel", "tire"],
+    "tire":           ["tires", "tyre", "wheel", "ctis", "inflation", "pressure", "flat"],
+    "ctis":           ["central tire inflation", "tire pressure", "air system"],
+    # Maintenance tasks
+    "oil change":     ["drain plug", "filter", "engine oil", "crankcase", "lube"],
+    "air filter":     ["air cleaner", "intake", "element", "restriction"],
+    "belt":           ["alternator belt", "fan belt", "serpentine", "tension", "pulley"],
+    "hose":           ["coolant hose", "clamp", "radiator hose", "heater hose"],
+    "tune up":        ["glow plug", "filter", "injector", "timing", "service"],
+    "torque":         ["ft-lb", "nm", "specification", "spec", "tighten"],
+    "seal":           ["gasket", "o-ring", "leak", "seepage"],
+    # PMCS / inspection
+    "pmcs":           ["preventive maintenance", "inspection", "before operation",
+                       "after operation", "weekly", "monthly"],
+    "check":          ["inspect", "verify", "ensure", "confirm", "examine"],
+    "leak":           ["leaking", "seeping", "dripping", "weeping", "fluid loss"],
+    # Noise
+    "noise":          ["sound", "rattle", "clunk", "squeal", "groan", "whine"],
+    "rattle":         ["loose", "bracket", "heat shield", "exhaust", "vibration"],
+    # Variants
+    "m998":           ["cargo", "basic hmmwv", "1-1/4 ton"],
+    "m1025":          ["armament carrier", "weapons mount"],
+    "m1114":          ["up-armored", "uah", "add-on armor"],
+    "m1151":          ["enhanced armament", "eav"],
+}
+
+# Stop words stripped from tokens — common English words with no retrieval value
+_STOP_WORDS = frozenset({
+    "the", "and", "for", "are", "was", "not", "with", "this", "that",
+    "from", "have", "has", "had", "will", "would", "could", "should",
+    "may", "can", "its", "it", "be", "been", "is", "in", "of", "to",
+    "on", "at", "by", "an", "or", "if", "do", "all", "any", "but",
+    "as", "so", "no", "up", "out", "use", "used", "per", "into", "than",
+    "then", "when", "where", "which", "who", "also", "each", "only",
+})
+
+
+def _expand_query(query: str) -> str:
+    """
+    Expand a user query with HMMWV-domain synonyms and TM terminology.
+    Returns the original query plus injected synonym tokens as a single
+    string so BM25 scores them alongside the original terms.
+    """
+    q_lower = query.lower()
+    extra: list[str] = []
+    for key, synonyms in _HMMWV_SYNONYMS.items():
+        if key in q_lower:
+            extra.extend(synonyms)
+    if not extra:
+        return query
+    return query + " " + " ".join(extra)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # PDF PROCESSOR
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -236,23 +348,62 @@ class PDFProcessor:
         text = re.sub(r"\u00c2([\u00a0-\u00ff])", r"\1", text)
         return text.strip()
 
+    # ── Section heading detection ────────────────────────────────────────
+
+    # Compiled patterns for military TM headings
+    _RE_TM_SECTION  = re.compile(
+        r'^(SECTION|CHAPTER|APPENDIX)\s+[IVXLCDM\d]+\.?\s+.+', re.IGNORECASE)
+    _RE_TM_PARA     = re.compile(r'^\d+[-–]\d+(\.\d+)*\.\s+[A-Z].{2,}')
+    _RE_TM_FIGURE   = re.compile(r'^(Figure|Fig|TABLE|Table)\s+\d+', re.IGNORECASE)
+    _RE_TASK_TITLE  = re.compile(r'^[A-Z][A-Z0-9 /,()-]{4,60}$')  # ALL-CAPS short line
+
+    def _detect_section_heading(self, text: str) -> str:
+        """
+        Extract the most prominent section/procedure heading from a TM page.
+        Returns empty string if no heading is detected.
+        Priority: SECTION/CHAPTER > numbered paragraph (2-14.) > ALL-CAPS line > Figure.
+        """
+        lines = text.split("\n")
+        figure_heading = ""
+        for line in lines[:25]:          # headings appear in first ~25 lines of a page
+            line = line.strip()
+            if not line or len(line) < 4:
+                continue
+            if self._RE_TM_SECTION.match(line):
+                return line[:120]
+            if self._RE_TM_PARA.match(line):
+                return line[:120]
+            if self._RE_TASK_TITLE.match(line) and len(line) > 6:
+                return line[:120]
+            if not figure_heading and self._RE_TM_FIGURE.match(line):
+                figure_heading = line[:120]
+        return figure_heading
+
     def extract_text_from_pdf(self, pdf_path: Path) -> list:
         import pdfplumber
         documents = []
+        # Track running section heading across pages (TM sections span many pages)
+        current_section = ""
         try:
             with pdfplumber.open(pdf_path) as pdf:
                 total_pages = len(pdf.pages)
                 for page_num, page in enumerate(pdf.pages, start=1):
                     text = self._clean_text(page.extract_text() or "")
-                    if text.strip():
-                        documents.append({
-                            "text": text,
-                            "metadata": {
-                                "source_file": pdf_path.name,
-                                "page_number": page_num,
-                                "total_pages": total_pages,
-                            },
-                        })
+                    if not text.strip():
+                        continue
+                    # Update running section heading when a new one is detected
+                    detected = self._detect_section_heading(text)
+                    if detected:
+                        current_section = detected
+                    documents.append({
+                        "text": text,
+                        "metadata": {
+                            "source_file":   pdf_path.name,
+                            "page_number":   page_num,
+                            "total_pages":   total_pages,
+                            "section_title": current_section,
+                        },
+                    })
         except Exception as e:
             logger.error(f"Error extracting text from {pdf_path.name}: {e}")
         return documents
@@ -276,9 +427,18 @@ class PDFProcessor:
         all_chunks = []
         for doc in documents:
             text, meta = doc["text"], doc["metadata"]
+            section    = meta.get("section_title", "")
+            # Heading prefix injected into every chunk so BM25 can match on it.
+            # Kept short to not bloat chunk size.
+            heading_prefix = f"[{section}]\n" if section else ""
             doc_chunks = []
+
             if len(text) <= CHUNK_SIZE:
-                doc_chunks.append({"text": text, "metadata": {**meta, "chunk_index": 0, "total_chunks": 1}})
+                enriched = heading_prefix + text
+                doc_chunks.append({
+                    "text": enriched,
+                    "metadata": {**meta, "chunk_index": 0, "total_chunks": 1},
+                })
             else:
                 paragraphs = []
                 for p in text.split("\n\n"):
@@ -286,14 +446,22 @@ class PDFProcessor:
                 current_chunk, chunk_idx = "", 0
                 for para in paragraphs:
                     if len(current_chunk) + len(para) + 2 > CHUNK_SIZE and current_chunk:
-                        doc_chunks.append({"text": current_chunk.strip(), "metadata": {**meta, "chunk_index": chunk_idx}})
+                        enriched = heading_prefix + current_chunk.strip()
+                        doc_chunks.append({
+                            "text": enriched,
+                            "metadata": {**meta, "chunk_index": chunk_idx},
+                        })
                         overlap = current_chunk[-CHUNK_OVERLAP:] if len(current_chunk) > CHUNK_OVERLAP else current_chunk
                         current_chunk = overlap + "\n\n" + para
                         chunk_idx += 1
                     else:
                         current_chunk = current_chunk + "\n\n" + para if current_chunk else para
                 if current_chunk.strip():
-                    doc_chunks.append({"text": current_chunk.strip(), "metadata": {**meta, "chunk_index": chunk_idx}})
+                    enriched = heading_prefix + current_chunk.strip()
+                    doc_chunks.append({
+                        "text": enriched,
+                        "metadata": {**meta, "chunk_index": chunk_idx},
+                    })
                 total = chunk_idx + 1
                 for c in doc_chunks:
                     if c["metadata"].get("total_chunks") is None:
@@ -390,12 +558,14 @@ class VectorStore:
     _STORE_FILE = "vector_store.json"
 
     def __init__(self):
-        self._documents: list = []
-        self._metadatas: list = []
-        self._ids: list = []
-        self._vocab: dict = {}
-        self._idf: list = []
-        self._tfidf_matrix: list = []
+        self._documents:   list  = []
+        self._metadatas:   list  = []
+        self._ids:         list  = []
+        # BM25 index structures (rebuilt from _documents on init/add)
+        self._idf:         dict  = {}   # term → idf score
+        self._doc_tf:      list  = []   # per-doc sparse Counter of token frequencies
+        self._doc_lengths: list  = []   # per-doc token count
+        self._avgdl:       float = 1.0  # corpus-wide average doc length
         self._initialized = False
 
     def _store_path(self) -> Path:
@@ -416,31 +586,40 @@ class VectorStore:
 
     @staticmethod
     def _tokenize(text: str) -> list:
-        return re.findall(r"[a-z0-9]{2,}", text.lower())
+        """Tokenise to lowercase alphanumeric tokens ≥2 chars, removing stop words."""
+        tokens = re.findall(r"[a-z0-9]{2,}", text.lower())
+        return [t for t in tokens if t not in _STOP_WORDS]
 
     def _build_index(self):
+        """
+        Build a BM25 index from self._documents.
+        BM25 score(D, Q) = Σ IDF(q) * tf(q,D)*(k1+1) / (tf(q,D) + k1*(1-b+b*|D|/avgdl))
+        IDF(q) = log((N - df(q) + 0.5) / (df(q) + 0.5) + 1)   [Robertson IDF]
+        """
         if not self._documents:
-            self._vocab, self._idf, self._tfidf_matrix = {}, [], []
+            self._idf, self._doc_tf, self._doc_lengths, self._avgdl = {}, [], [], 1.0
             return
-        doc_tokens = [self._tokenize(d) for d in self._documents]
-        n_docs = len(doc_tokens)
+
+        doc_tokens      = [self._tokenize(d) for d in self._documents]
+        n_docs          = len(doc_tokens)
+        self._doc_tf    = [Counter(t) for t in doc_tokens]
+        self._doc_lengths = [len(t) for t in doc_tokens]
+        self._avgdl     = sum(self._doc_lengths) / n_docs
+
+        # Document frequency per term
         df: Counter = Counter()
         for tokens in doc_tokens:
             df.update(set(tokens))
-        max_df = max(1, int(n_docs * 0.95))
-        self._vocab = {term: idx for idx, (term, freq) in enumerate(df.most_common()) if freq <= max_df}
-        vocab_size = len(self._vocab)
-        self._idf = [math.log(n_docs / (df[term] + 1)) + 1.0 for term in self._vocab]
-        self._tfidf_matrix = []
-        for tokens in doc_tokens:
-            tf  = Counter(tokens)
-            vec = [0.0] * vocab_size
-            for term, count in tf.items():
-                if term in self._vocab:
-                    i = self._vocab[term]
-                    vec[i] = (1 + math.log(count)) * self._idf[i]
-            norm = math.sqrt(sum(v * v for v in vec)) or 1.0
-            self._tfidf_matrix.append([v / norm for v in vec])
+
+        # Filter ultra-common terms (appear in >85% of docs — corpus-specific noise)
+        max_df = max(1, int(n_docs * 0.85))
+
+        # Robertson BM25 IDF — avoids negative values for very common terms
+        self._idf = {
+            term: math.log((n_docs - freq + 0.5) / (freq + 0.5) + 1.0)
+            for term, freq in df.items()
+            if freq <= max_df
+        }
 
     def initialize(self):
         self._load()
@@ -471,29 +650,61 @@ class VectorStore:
         return added
 
     def search(self, query: str, n_results: int = TOP_K_RESULTS, where: dict = None) -> list:
+        """
+        BM25 retrieval with query expansion and minimum-similarity filtering.
+        Returns results ranked by BM25 score, normalised to [0, 1].
+        Results scoring below MIN_SIMILARITY (after normalisation) are discarded.
+        """
         if not self._documents:
             return []
-        tokens = self._tokenize(query)
-        tf = Counter(tokens)
-        vocab_size = len(self._vocab)
-        q_vec = [0.0] * vocab_size
-        for term, count in tf.items():
-            if term in self._vocab:
-                i = self._vocab[term]
-                q_vec[i] = (1 + math.log(count)) * self._idf[i]
-        q_norm = math.sqrt(sum(v * v for v in q_vec)) or 1.0
-        q_vec  = [v / q_norm for v in q_vec]
+
+        # Expand query with domain synonyms before tokenising
+        expanded_query = _expand_query(query)
+        query_terms    = set(self._tokenize(expanded_query))
+
         scores = []
-        for idx, doc_vec in enumerate(self._tfidf_matrix):
+        k1, b   = BM25_K1, BM25_B
+        avgdl   = self._avgdl
+
+        for idx, doc_tf in enumerate(self._doc_tf):
             if where and not all(self._metadatas[idx].get(k) == v for k, v in where.items()):
                 continue
-            scores.append((idx, sum(q * d for q, d in zip(q_vec, doc_vec))))
+
+            dl    = self._doc_lengths[idx]
+            score = 0.0
+            for term in query_terms:
+                idf = self._idf.get(term, 0.0)
+                if idf <= 0.0:
+                    continue
+                tf_val = doc_tf.get(term, 0)
+                if tf_val == 0:
+                    continue
+                # BM25 term score
+                numerator   = tf_val * (k1 + 1.0)
+                denominator = tf_val + k1 * (1.0 - b + b * dl / avgdl)
+                score      += idf * numerator / denominator
+
+            scores.append((idx, score))
+
         scores.sort(key=lambda x: x[1], reverse=True)
-        return [
-            {"text": self._documents[i], "metadata": self._metadatas[i],
-             "distance": 1.0 - sim, "id": self._ids[i]}
-            for i, sim in scores[:n_results]
-        ]
+
+        # Normalise scores against the top result and apply similarity floor
+        results = []
+        max_score = scores[0][1] if scores and scores[0][1] > 0 else 1.0
+        for idx, raw_score in scores[:n_results * 2]:   # oversample then filter
+            normalised = raw_score / max_score
+            if normalised < MIN_SIMILARITY:
+                break   # sorted descending — nothing below this will pass
+            results.append({
+                "text":     self._documents[idx],
+                "metadata": self._metadatas[idx],
+                "distance": 1.0 - normalised,   # keep distance convention
+                "id":       self._ids[idx],
+            })
+            if len(results) == n_results:
+                break
+
+        return results
 
     def get_stats(self) -> dict:
         sources = {m["source_file"] for m in self._metadatas if "source_file" in m}
@@ -501,7 +712,7 @@ class VectorStore:
 
     def clear(self):
         self._documents, self._metadatas, self._ids = [], [], []
-        self._vocab, self._idf, self._tfidf_matrix = {}, [], []
+        self._idf, self._doc_tf, self._doc_lengths, self._avgdl = {}, [], [], 1.0
         p = self._store_path()
         if p.exists():
             p.unlink()
@@ -538,13 +749,21 @@ class AIEngine:
 
     def _format_context(self, results: list) -> str:
         if not results:
-            return "<knowledge_base_context>\nNo relevant content found.\n</knowledge_base_context>"
+            return "<knowledge_base_context>\nNo relevant content found in the knowledge base.\n</knowledge_base_context>"
         parts = ["<knowledge_base_context>"]
         for i, r in enumerate(results, 1):
-            src = r.get("metadata", {}).get("source_file", "Unknown")
-            pg  = r.get("metadata", {}).get("page_number", "?")
-            rel = max(0, 1 - r.get("distance", 0)) * 100
-            parts.append(f"\n--- Ref {i} | {src} | Page {pg} | {rel:.0f}% ---\n{r['text']}\n")
+            meta    = r.get("metadata", {})
+            src     = meta.get("source_file", "Unknown")
+            pg      = meta.get("page_number", "?")
+            section = meta.get("section_title", "")
+            rel     = max(0, 1 - r.get("distance", 0)) * 100
+            # Rich header gives the LLM provenance it can cite
+            header_parts = [f"Ref {i}", src, f"Page {pg}"]
+            if section:
+                header_parts.append(f"Section: {section}")
+            header_parts.append(f"Relevance: {rel:.0f}%")
+            header = " | ".join(header_parts)
+            parts.append(f"\n--- {header} ---\n{r['text']}\n")
         parts.append("</knowledge_base_context>")
         return "\n".join(parts)
 
@@ -1387,12 +1606,13 @@ def render_sidebar():
 
         if status["total_pdfs"] > 0:
             with st.expander("⚙️ Advanced"):
+                st.caption("♻️ Reprocess to apply improved BM25 indexing with section headings.")
                 if st.button("♻️ Reprocess All", width="stretch"):
-                    with st.spinner("Reprocessing…"):
+                    with st.spinner("Reprocessing with improved BM25 indexer…"):
                         vs.clear()
                         result = proc.process_all_pdfs(force=True)
                         if result["chunks"]: vs.add_chunks(result["chunks"])
-                        st.success(f"Reprocessed {result['total_pdfs']} PDFs")
+                        st.success(f"Reprocessed {result['total_pdfs']} PDFs · {result['total_chunks']} chunks")
                         st.rerun()
                 st.toggle("Show source references", value=True, key="show_sources")
 
