@@ -12,12 +12,14 @@ Usage:
 """
 
 import base64
+import concurrent.futures
 import hashlib
 import html as html_mod
 import json
 import logging
 import math
 import re
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -151,6 +153,138 @@ logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# MULTI-AGENT SYSTEM PROMPTS  (Pattern #3 — Specialized Role Agents)
+# ═══════════════════════════════════════════════════════════════════════════
+
+AGENT1_RETRIEVER_PROMPT = """\
+You are a document relevance analyst for HMMWV technical manuals.
+Given a mechanic's question and retrieved document chunks, select the most relevant chunks.
+Return ONLY a JSON array of the chunk indices (0-based) ordered by relevance.
+Example: [0, 2, 5, 1]
+Be selective — include only chunks that directly answer the question or contain required specs.
+"""
+
+AGENT2_PROCEDURE_PROMPT = """\
+You are an expert HMMWV maintenance procedure writer with 20+ years of hands-on experience.
+Your SOLE task: Write the step-by-step maintenance procedure for the mechanic's question.
+Use ONLY information from the provided technical manual context.
+
+Format:
+## Step-by-Step Procedure
+1. [First step — be specific, include exact values, tool sizes, directions]
+2. [Second step]
+...
+
+Rules:
+- Include exact torque specs as both ft-lbs and N·m
+- Include exact measurement values, clearances, pressures
+- Note critical sequences and timing where applicable
+- Do NOT include: safety warnings, parts lists, general overviews — those are handled by other agents
+- If the context lacks sufficient procedure detail, state exactly what is missing
+"""
+
+AGENT3_SAFETY_PROMPT = """\
+You are a HMMWV maintenance safety officer. Lives depend on you being thorough.
+Your SOLE task: Identify ALL safety hazards, warnings, and precautions for the mechanic's question.
+Use information from the provided technical manual context and standard HMMWV maintenance practices.
+
+Format:
+## ⚠️ Safety Warnings & Precautions
+
+**DANGER / WARNING / CAUTION:**
+- ⛔ DANGER: [Life-threatening hazards with consequences]
+- ⚠️ WARNING: [Injury hazards]
+- 🔔 CAUTION: [Equipment damage hazards]
+
+**Required PPE:**
+- [Personal Protective Equipment items]
+
+**Hazard Zones & Conditions:**
+- [Specific dangerous areas, voltages, pressures, temperatures]
+
+**Pre-Task Safety Checks:**
+- [Confirm vehicle is safe to work on — parking brake, chocks, etc.]
+
+Be thorough. Do not include procedure steps or parts lists.
+"""
+
+AGENT4_PARTS_PROMPT = """\
+You are a HMMWV parts and supply specialist (MOS 92A/91B trained).
+Your SOLE task: List ALL parts, tools, and consumables required for the mechanic's question.
+Use ONLY part numbers and NSNs from the provided technical manual context.
+
+Format:
+## 🔩 Parts & Materials Required
+
+**Replacement Parts:**
+| Part Name | NSN | Part Number | Qty |
+|-----------|-----|-------------|-----|
+| [name]    | [NSN or TBD] | [P/N or TBD] | [qty] |
+
+**Special Tools Required:**
+- [Tool name and specification — do not list common hand tools]
+
+**Consumables & Fluids:**
+- [Item: specification, quantity]
+
+**Cross-References / Substitutes (if in context):**
+- [Alternative part info]
+
+Mark unknown NSNs/part numbers as "TBD — see TM." Do not include procedure steps or safety warnings.
+"""
+
+AGENT5_SIMPLIFIER_PROMPT = """\
+You are a plain-language technical writer. Your audience: first-time mechanics with zero prior \
+mechanical experience.
+Your SOLE task: Rewrite the provided step-by-step procedure using simple, clear language that \
+an absolute beginner can follow.
+
+Rules:
+- Define every technical term in parentheses on first use:
+  e.g., "torque wrench (a special wrench that tightens bolts to a precise force)"
+- Split complex steps into smaller sub-steps labeled a., b., c.
+- Add "Why this matters:" notes for critical steps
+- Add "You'll know it's correct when:" cues after key steps
+- NEVER change any number, torque spec, measurement, or part number — copy them exactly
+- Use direct language: "Turn clockwise" not "rotate in a dextral direction"
+- Mention what the part looks like if helpful: "the round black rubber gasket"
+- Output the rewritten procedure ONLY, using the same numbered structure
+"""
+
+AGENT6_EDITOR_PROMPT = """\
+You are the HMMWV Technical Assistant final editor and synthesizer.
+You receive outputs from three specialist agents plus a simplified procedure.
+Your task: Synthesize these into ONE complete, coherent, well-structured maintenance guide.
+
+Mandatory output structure:
+
+## Task Overview
+[2-3 sentence description of what will be accomplished and why it matters]
+
+## ⚠️ Safety First
+[Insert Safety Agent output — condense duplicates, keep all unique warnings]
+
+## 🔩 Tools & Materials
+[Insert Parts Agent output — clean up formatting]
+
+## Step-by-Step Procedure
+[Insert the SIMPLIFIED procedure — this must be the simplified/beginner-friendly version]
+
+## ✅ Quality Verification
+[How to confirm the task was completed correctly — derive from procedure context]
+
+## 📎 Related Maintenance
+[2-3 other tasks the mechanic should consider — derive from context]
+
+Guidelines:
+- Do NOT repeat information across sections
+- If any agent reported missing data, note it clearly with "⚠️ Consult TM directly for [item]"
+- Cite source TMs by name where the context provides document names
+- Keep headers exactly as shown above — the app parses them for display
+"""
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # SETTINGS PERSISTENCE
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -167,6 +301,22 @@ def _default_settings() -> dict:
         "youtube_api_key": "",
         "youtube_enabled": True,
         "youtube_max_results": 3,
+        # ── Multi-Agent Pipeline (Pattern #3) ────────────────────────────
+        "agent_mode": False,           # False = single-agent, True = multi-agent pipeline
+        "agent1_enabled": False,       # Agent 1: LLM re-ranker (off by default — BM25 is fast enough)
+        "agent1_provider": PROVIDER_OLLAMA,
+        "agent1_model": OLLAMA_DEFAULT_MODEL,
+        "agent2_provider": PROVIDER_OLLAMA,   # Procedure Writer
+        "agent2_model": OLLAMA_DEFAULT_MODEL,
+        "agent3_provider": PROVIDER_OLLAMA,   # Safety Officer
+        "agent3_model": OLLAMA_DEFAULT_MODEL,
+        "agent4_provider": PROVIDER_OLLAMA,   # Parts Specialist
+        "agent4_model": OLLAMA_DEFAULT_MODEL,
+        "agent5_enabled": True,               # Agent 5: Simplifier (on by default)
+        "agent5_provider": PROVIDER_OLLAMA,
+        "agent5_model": OLLAMA_DEFAULT_MODEL,
+        "agent6_provider": PROVIDER_OLLAMA,   # Editor/Synthesizer
+        "agent6_model": OLLAMA_DEFAULT_MODEL,
     }
 
 def load_settings() -> dict:
@@ -881,12 +1031,244 @@ class AIEngine:
         elif self.provider == PROVIDER_ANTHROPIC:  yield from self._stream_anthropic(messages)
         else: yield f"❌ Unknown provider: {self.provider}"
 
+    def chat_complete(self, messages: list) -> str:
+        """
+        Non-streaming version — collects full response as a single string.
+        Used by MultiAgentPipeline agents that run in parallel threads.
+        Thread-safe: reads only from immutable self._cfg / self.provider.
+        """
+        parts: list = []
+        try:
+            if self.provider == PROVIDER_OLLAMA:
+                gen = self._stream_ollama(messages)
+            elif self.provider == PROVIDER_OPENAI:
+                gen = self._stream_openai(messages)
+            elif self.provider == PROVIDER_ANTHROPIC:
+                gen = self._stream_anthropic(messages)
+            else:
+                return f"❌ Unknown provider: {self.provider}"
+            for chunk in gen:
+                parts.append(chunk)
+        except Exception as e:
+            parts.append(f"❌ Agent error: {e}")
+        return "".join(parts)
+
     def diagnose(self, symptoms, search_results, vehicle_variant="") -> Generator:
         yield from self.chat_stream(
             "The mechanic reports the following symptoms. Provide a structured troubleshooting "
             "guide from simplest to most complex checks:\n\n" + symptoms,
             search_results, vehicle_variant=vehicle_variant,
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MULTI-AGENT PIPELINE  (Pattern #3 — Specialized Role Agents)
+# ═══════════════════════════════════════════════════════════════════════════
+
+class MultiAgentPipeline:
+    """
+    6-agent pattern with parallel specialists.
+
+    Pipeline:
+      1. RETRIEVER   — LLM re-ranks BM25 chunks (optional, fast model)
+      2. PROCEDURE   ─┐
+      3. SAFETY      ─┤ parallel (ThreadPoolExecutor)
+      4. PARTS       ─┘
+      5. SIMPLIFIER  — rewrites procedure for novice mechanics (optional)
+      6. EDITOR      — synthesizes all outputs into final structured answer
+
+    API keys are shared from the main provider settings; each agent only
+    needs its own (provider, model) pair.
+    """
+
+    # Agent metadata: {num: (display_name, emoji, hex_color)}
+    AGENT_META = {
+        1: ("Retriever",  "🔍", "#1565c0"),
+        2: ("Procedure",  "⚙️",  "#2e7d32"),
+        3: ("Safety",     "🦺", "#c62828"),
+        4: ("Parts",      "🔩", "#5c7a30"),
+        5: ("Simplifier", "📝", "#7b1fa2"),
+        6: ("Editor",     "✍️",  "#4b6526"),
+    }
+
+    def __init__(self, query: str, search_results: list,
+                 vehicle_variant: str = "", maintenance_category: str = ""):
+        self.query    = query
+        self.results  = search_results
+        self.variant  = vehicle_variant
+        self.category = maintenance_category
+
+    # ── Engine factory ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _make_engine(agent_num: int) -> "AIEngine":
+        """Build an AIEngine for a given agent using per-agent session settings."""
+        ss = st.session_state
+        provider = ss.get(f"agent{agent_num}_provider", ss.get("provider", PROVIDER_OLLAMA))
+        model    = ss.get(f"agent{agent_num}_model",    ss.get("ollama_model", OLLAMA_DEFAULT_MODEL))
+        if provider == PROVIDER_OLLAMA:
+            return AIEngine(provider,
+                            base_url=ss.get("ollama_url", OLLAMA_DEFAULT_URL),
+                            model=model)
+        elif provider == PROVIDER_OPENAI:
+            return AIEngine(provider,
+                            base_url=ss.get("openai_url", OPENAI_DEFAULT_URL),
+                            model=model,
+                            api_key=ss.get("openai_api_key", ""))
+        elif provider == PROVIDER_ANTHROPIC:
+            return AIEngine(provider,
+                            api_key=ss.get("anthropic_api_key", ""),
+                            model=model)
+        return AIEngine(PROVIDER_OLLAMA, model=model)
+
+    # ── Context builder ───────────────────────────────────────────────────
+
+    def _build_context(self, results: list | None = None) -> str:
+        r = results if results is not None else self.results
+        if not r:
+            return "No technical manual content retrieved."
+        parts = []
+        for i, chunk in enumerate(r):
+            meta = chunk.get("metadata", {})
+            src  = meta.get("source_file", "Unknown")
+            pg   = meta.get("page_number", "?")
+            sec  = meta.get("section_title", "")
+            rel  = max(0, 1 - chunk.get("distance", 0)) * 100
+            hdr  = f"Ref {i+1} | {src} | Page {pg}"
+            if sec:
+                hdr += f" | {sec}"
+            hdr += f" | {rel:.0f}% relevant"
+            parts.append(f"--- {hdr} ---\n{chunk['text']}\n")
+        return "\n".join(parts)
+
+    # ── Single agent runner ───────────────────────────────────────────────
+
+    def _run_agent(self, agent_num: int, system_prompt: str,
+                   user_content: str,
+                   status: dict, lock: threading.Lock) -> str:
+        """Run one agent (blocking). Updates shared status dict. Thread-safe."""
+        t0 = time.monotonic()
+        with lock:
+            status[agent_num] = ("🔄 Running…", t0)
+        try:
+            engine  = self._make_engine(agent_num)
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_content},
+            ]
+            result  = engine.chat_complete(messages)
+            elapsed = time.monotonic() - t0
+            with lock:
+                status[agent_num] = (f"✅ Done ({elapsed:.1f}s)", t0)
+            return result
+        except Exception as e:
+            elapsed = time.monotonic() - t0
+            with lock:
+                status[agent_num] = (f"❌ Error ({elapsed:.1f}s)", t0)
+            return f"[Agent {agent_num} failed: {e}]"
+
+    # ── Main orchestrator ─────────────────────────────────────────────────
+
+    def run(self, status: dict, lock: threading.Lock) -> dict:
+        """
+        Execute the full pipeline.  status/lock are shared with the caller
+        so the UI can poll for live updates.
+
+        Returns dict with keys:
+          procedure, simplified, safety, parts, final, used_results, timings
+        """
+        ss = st.session_state
+        variant_tag  = f"Vehicle: {self.variant}\n"  if self.variant  else ""
+        category_tag = f"Category: {self.category}\n" if self.category else ""
+        query_block  = f"{variant_tag}{category_tag}\nMechanic's Question:\n{self.query}"
+
+        # ── Agent 1: Context Re-ranker (optional LLM step) ────────────────
+        used_results = self.results
+        context      = self._build_context()
+
+        if ss.get("agent1_enabled", False) and len(self.results) > 4:
+            chunk_list = "\n".join(
+                f"[{i}] {r['text'][:200]}…" for i, r in enumerate(self.results)
+            )
+            a1_user = (
+                f"Mechanic's Question:\n{self.query}\n\n"
+                f"Retrieved chunks (select most relevant, return JSON array of indices):\n"
+                f"{chunk_list}"
+            )
+            a1_out = self._run_agent(1, AGENT1_RETRIEVER_PROMPT, a1_user, status, lock)
+            try:
+                m = re.search(r'\[[\d,\s]+\]', a1_out)
+                if m:
+                    indices = json.loads(m.group())
+                    indices = [i for i in indices if 0 <= i < len(self.results)]
+                    if indices:
+                        used_results = [self.results[i] for i in indices[:TOP_K_RESULTS]]
+                        context = self._build_context(used_results)
+                        with lock:
+                            msg, t0 = status[1]
+                            status[1] = (f"✅ Selected {len(used_results)} chunks", t0)
+            except Exception:
+                pass
+        else:
+            with lock:
+                status[1] = ("✅ BM25 retrieval (LLM re-rank disabled)", time.monotonic())
+
+        # ── Agents 2 / 3 / 4 — parallel ──────────────────────────────────
+        base_user = (
+            f"Context from HMMWV Technical Manuals:\n{context}\n\n{query_block}"
+        )
+        with lock:
+            status[2] = ("⏳ Queued", time.monotonic())
+            status[3] = ("⏳ Queued", time.monotonic())
+            status[4] = ("⏳ Queued", time.monotonic())
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            f2 = pool.submit(self._run_agent, 2, AGENT2_PROCEDURE_PROMPT, base_user, status, lock)
+            f3 = pool.submit(self._run_agent, 3, AGENT3_SAFETY_PROMPT,    base_user, status, lock)
+            f4 = pool.submit(self._run_agent, 4, AGENT4_PARTS_PROMPT,     base_user, status, lock)
+            procedure_raw = f2.result(timeout=300)
+            safety_out    = f3.result(timeout=300)
+            parts_out     = f4.result(timeout=300)
+
+        # ── Agent 5: Simplifier ───────────────────────────────────────────
+        if ss.get("agent5_enabled", True):
+            simplifier_user = (
+                f"Original procedure (written for experienced mechanics):\n\n{procedure_raw}"
+            )
+            procedure_simple = self._run_agent(
+                5, AGENT5_SIMPLIFIER_PROMPT, simplifier_user, status, lock
+            )
+        else:
+            procedure_simple = procedure_raw
+            with lock:
+                status[5] = ("⏭️ Skipped (disabled)", time.monotonic())
+
+        # ── Agent 6: Editor / Synthesizer ─────────────────────────────────
+        editor_user = (
+            f"Mechanic's Original Question:\n{self.query}\n\n"
+            f"--- PROCEDURE AGENT ---\n{procedure_simple}\n\n"
+            f"--- SAFETY AGENT ---\n{safety_out}\n\n"
+            f"--- PARTS AGENT ---\n{parts_out}\n\n"
+            f"Source Context (for citations):\n{context[:2500]}"
+        )
+        final_out = self._run_agent(6, AGENT6_EDITOR_PROMPT, editor_user, status, lock)
+
+        timings = {}
+        with lock:
+            for num, (msg, t0) in status.items():
+                # Extract elapsed from "(X.Xs)" in message if available
+                m = re.search(r'\((\d+\.\d+)s\)', msg)
+                timings[num] = float(m.group(1)) if m else 0.0
+
+        return {
+            "procedure":    procedure_raw,
+            "simplified":   procedure_simple,
+            "safety":       safety_out,
+            "parts":        parts_out,
+            "final":        final_out,
+            "used_results": used_results,
+            "timings":      timings,
+        }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1374,18 +1756,34 @@ st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
 def init_session():
     if "_settings_loaded" not in st.session_state:
         saved = load_settings()
-        st.session_state._settings_loaded  = True
-        st.session_state.provider          = saved["provider"]
-        st.session_state.ollama_url        = saved["ollama_url"]
-        st.session_state.ollama_model      = saved["ollama_model"]
-        st.session_state.openai_url        = saved["openai_url"]
-        st.session_state.openai_model      = saved["openai_model"]
-        st.session_state.openai_api_key    = saved["openai_api_key"]
+        st.session_state._settings_loaded   = True
+        st.session_state.provider           = saved["provider"]
+        st.session_state.ollama_url         = saved["ollama_url"]
+        st.session_state.ollama_model       = saved["ollama_model"]
+        st.session_state.openai_url         = saved["openai_url"]
+        st.session_state.openai_model       = saved["openai_model"]
+        st.session_state.openai_api_key     = saved["openai_api_key"]
         st.session_state.anthropic_api_key  = saved["anthropic_api_key"]
         st.session_state.anthropic_model    = saved["anthropic_model"]
         st.session_state.youtube_api_key    = saved.get("youtube_api_key", "")
         st.session_state.youtube_enabled    = saved.get("youtube_enabled", True)
         st.session_state.youtube_max_results = saved.get("youtube_max_results", 3)
+        # Multi-agent pipeline settings
+        st.session_state.agent_mode      = saved.get("agent_mode", False)
+        st.session_state.agent1_enabled  = saved.get("agent1_enabled", False)
+        st.session_state.agent1_provider = saved.get("agent1_provider", PROVIDER_OLLAMA)
+        st.session_state.agent1_model    = saved.get("agent1_model", OLLAMA_DEFAULT_MODEL)
+        st.session_state.agent2_provider = saved.get("agent2_provider", PROVIDER_OLLAMA)
+        st.session_state.agent2_model    = saved.get("agent2_model", OLLAMA_DEFAULT_MODEL)
+        st.session_state.agent3_provider = saved.get("agent3_provider", PROVIDER_OLLAMA)
+        st.session_state.agent3_model    = saved.get("agent3_model", OLLAMA_DEFAULT_MODEL)
+        st.session_state.agent4_provider = saved.get("agent4_provider", PROVIDER_OLLAMA)
+        st.session_state.agent4_model    = saved.get("agent4_model", OLLAMA_DEFAULT_MODEL)
+        st.session_state.agent5_enabled  = saved.get("agent5_enabled", True)
+        st.session_state.agent5_provider = saved.get("agent5_provider", PROVIDER_OLLAMA)
+        st.session_state.agent5_model    = saved.get("agent5_model", OLLAMA_DEFAULT_MODEL)
+        st.session_state.agent6_provider = saved.get("agent6_provider", PROVIDER_OLLAMA)
+        st.session_state.agent6_model    = saved.get("agent6_model", OLLAMA_DEFAULT_MODEL)
 
     for k, v in {
         "messages": [], "vehicle_variant": "", "maintenance_category": "",
@@ -1412,18 +1810,35 @@ def get_vector_store():
     return vs
 
 def _collect_settings() -> dict:
+    ss = st.session_state
     return {
-        "provider": st.session_state.provider,
-        "ollama_url": st.session_state.ollama_url,
-        "ollama_model": st.session_state.ollama_model,
-        "openai_url": st.session_state.openai_url,
-        "openai_model": st.session_state.openai_model,
-        "openai_api_key": st.session_state.openai_api_key,
-        "anthropic_api_key": st.session_state.anthropic_api_key,
-        "anthropic_model": st.session_state.anthropic_model,
-        "youtube_api_key": st.session_state.get("youtube_api_key", ""),
-        "youtube_enabled": st.session_state.get("youtube_enabled", True),
-        "youtube_max_results": st.session_state.get("youtube_max_results", 3),
+        "provider": ss.provider,
+        "ollama_url": ss.ollama_url,
+        "ollama_model": ss.ollama_model,
+        "openai_url": ss.openai_url,
+        "openai_model": ss.openai_model,
+        "openai_api_key": ss.openai_api_key,
+        "anthropic_api_key": ss.anthropic_api_key,
+        "anthropic_model": ss.anthropic_model,
+        "youtube_api_key": ss.get("youtube_api_key", ""),
+        "youtube_enabled": ss.get("youtube_enabled", True),
+        "youtube_max_results": ss.get("youtube_max_results", 3),
+        # Multi-agent settings
+        "agent_mode":     ss.get("agent_mode", False),
+        "agent1_enabled": ss.get("agent1_enabled", False),
+        "agent1_provider": ss.get("agent1_provider", PROVIDER_OLLAMA),
+        "agent1_model":    ss.get("agent1_model", OLLAMA_DEFAULT_MODEL),
+        "agent2_provider": ss.get("agent2_provider", PROVIDER_OLLAMA),
+        "agent2_model":    ss.get("agent2_model", OLLAMA_DEFAULT_MODEL),
+        "agent3_provider": ss.get("agent3_provider", PROVIDER_OLLAMA),
+        "agent3_model":    ss.get("agent3_model", OLLAMA_DEFAULT_MODEL),
+        "agent4_provider": ss.get("agent4_provider", PROVIDER_OLLAMA),
+        "agent4_model":    ss.get("agent4_model", OLLAMA_DEFAULT_MODEL),
+        "agent5_enabled":  ss.get("agent5_enabled", True),
+        "agent5_provider": ss.get("agent5_provider", PROVIDER_OLLAMA),
+        "agent5_model":    ss.get("agent5_model", OLLAMA_DEFAULT_MODEL),
+        "agent6_provider": ss.get("agent6_provider", PROVIDER_OLLAMA),
+        "agent6_model":    ss.get("agent6_model", OLLAMA_DEFAULT_MODEL),
     }
 
 def get_ai_engine() -> AIEngine:
@@ -1543,6 +1958,167 @@ def _provider_section():
         save_settings(_collect_settings())
 
 
+def _build_pipeline_status_html(status: dict, t_start: float, done: bool = False) -> str:
+    """
+    Build an HTML status panel showing each agent's progress.
+    status: {agent_num: (message_str, t0_float)}
+    """
+    elapsed_total = time.monotonic() - t_start
+    rows = ""
+    for num in range(1, 7):
+        name, emoji, color = MultiAgentPipeline.AGENT_META[num]
+        msg, _t0 = status.get(num, ("⏳ Waiting", t_start))
+        if msg.startswith("✅"):
+            icon_html = f'<span style="color:#2e7d32;font-size:13px">✅</span>'
+            msg_color = "#2e7d32"
+        elif msg.startswith("🔄"):
+            icon_html = (
+                '<span style="display:inline-block;width:10px;height:10px;'
+                'border-radius:50%;background:#5c7a30;'
+                'animation:spin .8s linear infinite"></span>'
+            )
+            msg_color = "#5c7a30"
+        elif msg.startswith("❌"):
+            icon_html = f'<span style="color:#c62828;font-size:13px">❌</span>'
+            msg_color = "#c62828"
+        elif msg.startswith("⏭️"):
+            icon_html = f'<span style="color:#7b1fa2;font-size:13px">⏭️</span>'
+            msg_color = "#7b1fa2"
+        else:
+            icon_html = f'<span style="color:#9e9e9e;font-size:13px">⏳</span>'
+            msg_color = "#9e9e9e"
+
+        badge = (
+            f'<span style="display:inline-flex;align-items:center;gap:4px;'
+            f'background:{color}18;border:1px solid {color}44;border-radius:4px;'
+            f'padding:1px 7px;font-family:monospace;font-size:0.65rem;'
+            f'color:{color};font-weight:700;margin-right:6px">'
+            f'{emoji} {name}</span>'
+        )
+        rows += (
+            f'<div style="display:flex;align-items:center;gap:6px;'
+            f'padding:5px 8px;border-bottom:1px solid #e8ebe2;">'
+            f'{icon_html}{badge}'
+            f'<span style="font-size:0.72rem;color:{msg_color};flex:1">{html_mod.escape(msg)}</span>'
+            f'</div>'
+        )
+
+    status_label = "✅ Pipeline complete" if done else f"🤖 Running pipeline… ({elapsed_total:.1f}s)"
+    return (
+        f'<div style="border:1px solid #d0d5c8;border-radius:8px;overflow:hidden;'
+        f'font-family:system-ui,sans-serif;margin:6px 0;">'
+        f'<div style="background:linear-gradient(90deg,#3a5020,#4b6526);'
+        f'padding:6px 10px;font-size:0.72rem;font-weight:700;color:#d4dfc2;'
+        f'letter-spacing:1px;display:flex;justify-content:space-between;">'
+        f'<span>🤖 AGENT PIPELINE</span><span>{html_mod.escape(status_label)}</span></div>'
+        f'{rows}'
+        f'<style>@keyframes spin{{to{{transform:rotate(360deg)}}}}</style>'
+        f'</div>'
+    )
+
+
+def _agent_config_row(label: str, emoji: str, color: str,
+                      agent_num: int, key_prefix: str):
+    """Render a compact provider + model config row for one agent."""
+    st.markdown(
+        f'<div style="display:flex;align-items:center;gap:6px;margin:6px 0 2px;'
+        f'font-family:var(--font-mono);font-size:0.68rem;font-weight:700;'
+        f'color:{color};">{emoji} {label}</div>',
+        unsafe_allow_html=True,
+    )
+    col_p, col_m = st.columns([1, 2])
+    with col_p:
+        prov = st.selectbox(
+            "Provider",
+            ALL_PROVIDERS,
+            index=ALL_PROVIDERS.index(st.session_state.get(f"agent{agent_num}_provider", PROVIDER_OLLAMA))
+                  if st.session_state.get(f"agent{agent_num}_provider") in ALL_PROVIDERS else 0,
+            key=f"{key_prefix}_prov",
+            label_visibility="collapsed",
+        )
+        if prov != st.session_state.get(f"agent{agent_num}_provider"):
+            st.session_state[f"agent{agent_num}_provider"] = prov
+            save_settings(_collect_settings())
+    with col_m:
+        mdl = st.text_input(
+            "Model",
+            value=st.session_state.get(f"agent{agent_num}_model", OLLAMA_DEFAULT_MODEL),
+            key=f"{key_prefix}_mdl",
+            label_visibility="collapsed",
+            placeholder="model name…",
+        )
+        if mdl != st.session_state.get(f"agent{agent_num}_model"):
+            st.session_state[f"agent{agent_num}_model"] = mdl
+            save_settings(_collect_settings())
+
+
+def _agent_pipeline_section():
+    """Sidebar section for the multi-agent pipeline configuration."""
+    _sb_label("🤖", "AGENT PIPELINE")
+
+    agent_mode = st.toggle(
+        "Enable Multi-Agent Mode",
+        value=st.session_state.get("agent_mode", False),
+        key="agent_mode",
+        help="Routes queries through 6 specialized agents instead of a single LLM call.",
+    )
+    if agent_mode != st.session_state.get("_prev_agent_mode"):
+        st.session_state["_prev_agent_mode"] = agent_mode
+        save_settings(_collect_settings())
+
+    if not agent_mode:
+        st.caption("Single-agent mode active. Toggle above to enable the 6-agent pipeline.")
+        return
+
+    st.markdown(
+        '<div style="font-size:0.7rem;color:#5a6050;background:#f0f4e8;'
+        'border:1px solid #d4dfc2;border-radius:6px;padding:6px 8px;margin:4px 0 8px">'
+        '⚙️ <b>Procedure</b> · 🦺 <b>Safety</b> · 🔩 <b>Parts</b> run in parallel.<br>'
+        '📝 <b>Simplifier</b> rewrites for beginners. ✍️ <b>Editor</b> synthesizes the final answer.<br>'
+        'API keys are shared from the main provider settings above.</div>',
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("🔍 Agent 1 — Retriever", expanded=False):
+        a1_on = st.toggle(
+            "Enable LLM re-ranking",
+            value=st.session_state.get("agent1_enabled", False),
+            key="agent1_enabled",
+            help="Uses an LLM to re-rank BM25 results. Slower but may improve relevance.",
+        )
+        if a1_on != st.session_state.get("_prev_a1"):
+            st.session_state["_prev_a1"] = a1_on
+            save_settings(_collect_settings())
+        if a1_on:
+            _agent_config_row("Retriever", "🔍", "#1565c0", 1, "a1")
+        else:
+            st.caption("BM25 retrieval only (fast). Enable above for LLM re-ranking.")
+
+    with st.expander("⚙️🦺🔩 Agents 2/3/4 — Parallel Specialists", expanded=True):
+        st.caption("These three agents run simultaneously:")
+        _agent_config_row("Procedure Writer", "⚙️", "#2e7d32", 2, "a2")
+        st.divider()
+        _agent_config_row("Safety Officer", "🦺", "#c62828", 3, "a3")
+        st.divider()
+        _agent_config_row("Parts Specialist", "🔩", "#5c7a30", 4, "a4")
+
+    with st.expander("📝 Agent 5 — Simplifier", expanded=False):
+        a5_on = st.toggle(
+            "Enable Simplifier",
+            value=st.session_state.get("agent5_enabled", True),
+            key="agent5_enabled",
+            help="Rewrites procedures in plain language for inexperienced mechanics.",
+        )
+        if a5_on != st.session_state.get("_prev_a5"):
+            st.session_state["_prev_a5"] = a5_on
+            save_settings(_collect_settings())
+        if a5_on:
+            _agent_config_row("Simplifier", "📝", "#7b1fa2", 5, "a5")
+
+    with st.expander("✍️ Agent 6 — Editor / Synthesizer", expanded=False):
+        _agent_config_row("Editor", "✍️", "#4b6526", 6, "a6")
+
+
 def render_sidebar():
     with st.sidebar:
         # Brand mark
@@ -1653,6 +2229,10 @@ def render_sidebar():
             )
             if not st.session_state.get("youtube_api_key"):
                 st.caption("⚠️ Add an API key to enable video search.")
+
+        # Agent Pipeline section
+        st.divider()
+        _agent_pipeline_section()
 
         st.divider()
         if st.button("🗑️ Clear Chat", width="stretch"):
@@ -2417,8 +2997,121 @@ def render_inline_images(search_results: list):
                 st.image(img_path, caption=label, width="stretch")
 
 
+def _run_multi_agent_response(placeholder, user_input: str,
+                               search_results: list, history: list) -> tuple:
+    """
+    Execute the 6-agent pipeline and display live status in the chat.
+
+    Returns (final_text: str, pipeline_result: dict).
+    The pipeline runs in a background thread while the main thread
+    polls the shared status dict and updates the status placeholder.
+    """
+    # ── Shared state ──────────────────────────────────────────────────────
+    _status: dict = {i: ("⏳ Waiting", time.monotonic()) for i in range(1, 7)}
+    _lock   = threading.Lock()
+    _result: list = []   # mutable container for pipeline output
+    _error:  list = []
+
+    pipeline = MultiAgentPipeline(
+        query=user_input,
+        search_results=search_results,
+        vehicle_variant=st.session_state.get("vehicle_variant", ""),
+        maintenance_category=st.session_state.get("maintenance_category", ""),
+    )
+
+    def _run_pipeline():
+        try:
+            out = pipeline.run(_status, _lock)
+            _result.append(out)
+        except Exception as e:
+            _error.append(str(e))
+
+    t_start = time.monotonic()
+    status_slot = st.empty()
+
+    # ── Launch pipeline in background thread ──────────────────────────────
+    worker = threading.Thread(target=_run_pipeline, daemon=True)
+    worker.start()
+
+    # ── Main thread: poll + update live status panel ──────────────────────
+    while worker.is_alive():
+        with _lock:
+            snap = dict(_status)
+        status_slot.markdown(
+            _build_pipeline_status_html(snap, t_start), unsafe_allow_html=True
+        )
+        time.sleep(0.4)
+
+    worker.join()
+
+    # Final status (done=True → green header)
+    with _lock:
+        snap = dict(_status)
+    status_slot.markdown(
+        _build_pipeline_status_html(snap, t_start, done=True), unsafe_allow_html=True
+    )
+
+    if _error:
+        err_msg = f"❌ Multi-agent pipeline error: {_error[0]}"
+        placeholder.markdown(err_msg)
+        time.sleep(2.0)
+        status_slot.empty()
+        return err_msg, {}
+
+    result    = _result[0]
+    final_txt = result.get("final", "")
+
+    # Write the final response (already complete — render it directly)
+    placeholder.markdown(final_txt)
+
+    # Brief pause so the user can see the completed status panel, then fade
+    time.sleep(2.5)
+    status_slot.empty()
+
+    return final_txt, result
+
+
+def render_agent_review(pipeline_result: dict):
+    """
+    Render a collapsible 'Agent Review' panel showing each specialist's raw output.
+    Displayed below the final answer so users can inspect what each agent contributed.
+    """
+    if not pipeline_result:
+        return
+
+    timings = pipeline_result.get("timings", {})
+
+    def _timing_badge(num: int) -> str:
+        t = timings.get(num, 0)
+        return f" ({t:.1f}s)" if t > 0 else ""
+
+    with st.expander("🤖 Agent Review — inspect individual agent outputs", expanded=False):
+        tabs = st.tabs([
+            f"⚙️ Procedure{_timing_badge(2)}",
+            f"🦺 Safety{_timing_badge(3)}",
+            f"🔩 Parts{_timing_badge(4)}",
+            f"📝 Simplified{_timing_badge(5)}",
+        ])
+        with tabs[0]:
+            st.markdown(pipeline_result.get("procedure", "_No output_"))
+        with tabs[1]:
+            st.markdown(pipeline_result.get("safety", "_No output_"))
+        with tabs[2]:
+            st.markdown(pipeline_result.get("parts", "_No output_"))
+        with tabs[3]:
+            simplified = pipeline_result.get("simplified", "")
+            if simplified and simplified != pipeline_result.get("procedure", ""):
+                st.markdown(simplified)
+            else:
+                st.caption("Simplifier was disabled or output matched procedure.")
+
+        used = pipeline_result.get("used_results", [])
+        if used:
+            st.caption(f"📚 {len(used)} knowledge-base chunks fed to agents.")
+
+
 def render_chat():
-    # Replay history
+    # ── Replay history ────────────────────────────────────────────────────
     for idx, msg in enumerate(st.session_state.messages):
         avatar = "🧑‍🔧" if msg["role"] == "user" else "🔧"
         with st.chat_message(msg["role"], avatar=avatar):
@@ -2430,10 +3123,13 @@ def render_chat():
                 if msg.get("sources"):
                     render_inline_images(msg["sources"])
                     render_sources(msg["sources"])
+                # Show agent review panel if this was a multi-agent response
+                if msg.get("pipeline_result"):
+                    render_agent_review(msg["pipeline_result"])
                 if msg.get("videos"):
                     render_youtube_videos(msg["videos"])
 
-    # Input
+    # ── Chat input ────────────────────────────────────────────────────────
     placeholders = {
         "chat":    "Describe the maintenance task (e.g. 'Replace fuel filter on M1151')…",
         "diagnose":"Describe the symptoms (e.g. 'Engine overheating with white smoke')…",
@@ -2446,44 +3142,63 @@ def render_chat():
     if quick:
         user_input = quick
 
-    if user_input:
-        st.session_state.messages.append({"role": "user", "content": user_input})
-        with st.chat_message("user", avatar="🧑‍🔧"):
-            st.markdown(user_input)
+    if not user_input:
+        return
 
-        vs             = get_vector_store()
-        search_results = vs.search(user_input, n_results=TOP_K_RESULTS)
-        history        = [{"role": m["role"], "content": m["content"]}
-                          for m in st.session_state.messages[:-1][-12:]]
-        ai             = get_ai_engine()
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    with st.chat_message("user", avatar="🧑‍🔧"):
+        st.markdown(user_input)
 
-        with st.chat_message("assistant", avatar="🔧"):
-            placeholder = st.empty()
-            response    = _stream_response(placeholder, ai, user_input, search_results, history)
-            col1, col2  = st.columns([8, 1])
-            with col2:
-                render_print_button(response, len(st.session_state.messages), search_results)
-            render_inline_images(search_results)
-            render_sources(search_results)
+    vs             = get_vector_store()
+    search_results = vs.search(user_input, n_results=TOP_K_RESULTS)
+    history        = [{"role": m["role"], "content": m["content"]}
+                      for m in st.session_state.messages[:-1][-12:]]
+    pipeline_result = {}
 
-            # YouTube video search (runs after AI response is complete)
-            yt_videos = []
-            if st.session_state.get("youtube_enabled", True) and \
-               st.session_state.get("youtube_api_key", ""):
-                with st.spinner("🎬 Searching YouTube for related videos…"):
-                    yt_videos = search_youtube(
-                        user_input,
-                        vehicle_variant=st.session_state.vehicle_variant,
-                        api_key=st.session_state.youtube_api_key,
-                        max_results=st.session_state.get("youtube_max_results", 3),
-                    )
-            if yt_videos:
-                render_youtube_videos(yt_videos, query=user_input)
+    with st.chat_message("assistant", avatar="🔧"):
+        placeholder = st.empty()
 
-        st.session_state.messages.append({
-            "role": "assistant", "content": response,
-            "sources": search_results, "videos": yt_videos,
-        })
+        # ── Branch: multi-agent vs single-agent ───────────────────────────
+        if st.session_state.get("agent_mode", False):
+            response, pipeline_result = _run_multi_agent_response(
+                placeholder, user_input, search_results, history
+            )
+            used_results = pipeline_result.get("used_results", search_results)
+        else:
+            ai       = get_ai_engine()
+            response = _stream_response(placeholder, ai, user_input, search_results, history)
+            used_results = search_results
+
+        # ── Common post-response UI ───────────────────────────────────────
+        col1, col2 = st.columns([8, 1])
+        with col2:
+            render_print_button(response, len(st.session_state.messages), used_results)
+        render_inline_images(used_results)
+        render_sources(used_results)
+
+        if pipeline_result:
+            render_agent_review(pipeline_result)
+
+        # YouTube video search (runs after AI response is complete)
+        yt_videos = []
+        if st.session_state.get("youtube_enabled", True) and \
+           st.session_state.get("youtube_api_key", ""):
+            with st.spinner("🎬 Searching YouTube for related videos…"):
+                yt_videos = search_youtube(
+                    user_input,
+                    vehicle_variant=st.session_state.vehicle_variant,
+                    api_key=st.session_state.youtube_api_key,
+                    max_results=st.session_state.get("youtube_max_results", 3),
+                )
+        if yt_videos:
+            render_youtube_videos(yt_videos, query=user_input)
+
+    st.session_state.messages.append({
+        "role": "assistant", "content": response,
+        "sources": used_results,
+        "pipeline_result": pipeline_result,
+        "videos": yt_videos,
+    })
 
 
 # ═══════════════════════════════════════════════════════════════════════════
