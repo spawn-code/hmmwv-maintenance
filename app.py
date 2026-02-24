@@ -646,19 +646,19 @@ class PDFProcessor:
             logger.error(f"Error extracting images from {pdf_path.name}: {e}")
         return extracted
 
-    def extract_page_as_image(self, pdf_path: Path, page_number: int) -> Optional[str]:
+    def extract_page_as_image(self, pdf_path: Path, page_number: int, dpi: int = 300) -> Optional[str]:
         import pdfplumber
         pdf_stem = pdf_path.stem
         out_dir = self.image_dir / pdf_stem / "pages"
         out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"page_{page_number:04d}.png"
+        out_path = out_dir / f"page_{page_number:04d}_{dpi}dpi.png"
         if out_path.exists():
             return str(out_path)
         try:
             with pdfplumber.open(pdf_path) as pdf:
                 if page_number < 1 or page_number > len(pdf.pages):
                     return None
-                pdf.pages[page_number - 1].to_image(resolution=200).save(str(out_path))
+                pdf.pages[page_number - 1].to_image(resolution=dpi).save(str(out_path))
                 return str(out_path)
         except Exception as e:
             logger.error(f"Error rendering page {page_number} of {pdf_path.name}: {e}")
@@ -1083,12 +1083,12 @@ class MultiAgentPipeline:
 
     # Agent metadata: {num: (display_name, emoji, hex_color)}
     AGENT_META = {
-        1: ("Retriever",  "🔍", "#1565c0"),
-        2: ("Procedure",  "⚙️",  "#2e7d32"),
-        3: ("Safety",     "🦺", "#c62828"),
-        4: ("Parts",      "🔩", "#5c7a30"),
-        5: ("Simplifier", "📝", "#7b1fa2"),
-        6: ("Editor",     "✍️",  "#4b6526"),
+        1: ("Retriever",  "🔍", "#3b82f6"),
+        2: ("Procedure",  "⚙️",  "#10b981"),
+        3: ("Safety",     "🦺", "#ef4444"),
+        4: ("Parts",      "🔩", "#0d9488"),
+        5: ("Simplifier", "📝", "#8b5cf6"),
+        6: ("Editor",     "✍️",  "#2563eb"),
     }
 
     def __init__(self, query: str, search_results: list,
@@ -1292,63 +1292,62 @@ GLOBAL_CSS = """
 /* ── Google Fonts ─────────────────────────────────────────────────────── */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
-/* ── Design Tokens — Light Theme ──────────────────────────────────────── */
+/* ── Design Tokens — Modern Clean Theme ──────────────────────────────── */
 :root {
   /* Page & surface */
-  --c-bg:          #f5f6f2;
+  --c-bg:          #fafafa;
   --c-surface:     #ffffff;
-  --c-surface-2:   #f0f2ec;
-  --c-surface-3:   #e8ebe2;
-  --c-border:      #d0d5c8;
-  --c-border-2:    #b8bfae;
+  --c-surface-2:   #f1f5f9;
+  --c-surface-3:   #e2e8f0;
+  --c-border:      #e2e8f0;
+  --c-border-2:    #cbd5e1;
 
-  /* Accent greens (olive-drab, shifted lighter for readability on white) */
-  --c-green-900:   #e8eddc;
-  --c-green-800:   #d4dfc2;
-  --c-green-700:   #a8bc7a;
-  --c-green-600:   #7a9448;
-  --c-green-500:   #5c7a30;
-  --c-green-400:   #4b6526;
-  --c-green-300:   #3a5020;
-  --c-green-200:   #2d3e18;
-  --c-green-100:   #1e2a10;
+  /* Primary — Blue */
+  --c-primary:     #2563eb;
+  --c-primary-hover: #1d4ed8;
+  --c-primary-light: #eff6ff;
+  --c-primary-muted: #93c5fd;
 
-  /* Tan / Sand — darker for contrast on white */
-  --c-tan:         #8a6a30;
-  --c-tan-light:   #5a4220;
-  --c-tan-dim:     #a88040;
-  --c-sand:        #f5ecd8;
+  /* Secondary — Teal */
+  --c-secondary:   #0d9488;
+  --c-secondary-light: #f0fdfa;
 
-  /* Body text */
-  --c-text:        #1e2318;
-  --c-text-2:      #3a4030;
-  --c-text-3:      #5a6050;
-  --c-text-muted:  #7a8070;
+  /* Accent — Amber */
+  --c-accent:      #f59e0b;
+  --c-accent-light: #fffbeb;
 
   /* Status */
-  --c-success:     #2e7d32;
-  --c-warning:     #e65100;
-  --c-error:       #c62828;
-  --c-info:        #1565c0;
+  --c-success:     #10b981;
+  --c-success-light: #ecfdf5;
+  --c-warning:     #f59e0b;
+  --c-error:       #ef4444;
+  --c-error-light: #fef2f2;
+  --c-info:        #3b82f6;
+
+  /* Body text */
+  --c-text:        #1e293b;
+  --c-text-2:      #334155;
+  --c-text-3:      #475569;
+  --c-text-muted:  #64748b;
 
   /* Typography */
-  --font-body:     'Inter', system-ui, sans-serif;
+  --font-body:     'Inter', system-ui, -apple-system, sans-serif;
   --font-mono:     'JetBrains Mono', 'Fira Code', monospace;
 
   /* Spacing */
-  --radius-sm:     4px;
-  --radius-md:     8px;
-  --radius-lg:     12px;
-  --radius-xl:     16px;
+  --radius-sm:     6px;
+  --radius-md:     10px;
+  --radius-lg:     14px;
+  --radius-xl:     20px;
   --radius-pill:   999px;
 
-  /* Shadows — softer on light backgrounds */
-  --shadow-sm:     0 1px 3px rgba(0,0,0,.1);
-  --shadow-md:     0 4px 12px rgba(0,0,0,.12);
-  --shadow-lg:     0 8px 24px rgba(0,0,0,.15);
+  /* Shadows — soft and modern */
+  --shadow-sm:     0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+  --shadow-md:     0 4px 12px rgba(0,0,0,.07), 0 2px 4px rgba(0,0,0,.04);
+  --shadow-lg:     0 10px 25px rgba(0,0,0,.08), 0 4px 10px rgba(0,0,0,.04);
 
   /* Transitions */
-  --transition:    0.18s cubic-bezier(.4,0,.2,1);
+  --transition:    0.2s cubic-bezier(.4,0,.2,1);
 }
 
 /* ── Global resets ────────────────────────────────────────────────────── */
@@ -1358,6 +1357,8 @@ GLOBAL_CSS = """
   font-family: var(--font-body);
   background: var(--c-bg);
   color: var(--c-text);
+  font-size: 15px;
+  line-height: 1.6;
 }
 
 /* Hide Streamlit chrome */
@@ -1368,11 +1369,11 @@ GLOBAL_CSS = """
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: var(--c-surface-2); }
 ::-webkit-scrollbar-thumb { background: var(--c-border-2); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--c-green-500); }
+::-webkit-scrollbar-thumb:hover { background: var(--c-primary); }
 
 /* ── Sidebar ──────────────────────────────────────────────────────────── */
 section[data-testid="stSidebar"] {
-  background: linear-gradient(180deg, #ffffff 0%, var(--c-surface-2) 100%);
+  background: #ffffff;
   border-right: 1px solid var(--c-border);
 }
 section[data-testid="stSidebar"] > div { padding-top: 0 !important; }
@@ -1380,39 +1381,10 @@ section[data-testid="stSidebar"] > div { padding-top: 0 !important; }
 /* Sidebar section labels */
 .sb-label {
   display: flex; align-items: center; gap: 8px;
-  font-family: var(--font-mono); font-size: 0.7rem; font-weight: 700;
-  letter-spacing: 2px; text-transform: uppercase;
-  color: var(--c-green-400); padding: 1rem 0 0.5rem 0;
-  border-bottom: 1px solid var(--c-border);
-  margin-bottom: 0.75rem;
-}
-.sb-label svg { flex-shrink: 0; }
-
-/* Sidebar provider card */
-.provider-card {
-  background: var(--c-surface); border: 1px solid var(--c-border);
-  border-radius: var(--radius-md); padding: 0.75rem;
-  margin-bottom: 0.75rem; transition: border-color var(--transition);
-}
-.provider-card:hover { border-color: var(--c-green-500); }
-
-/* Provider selector pills */
-.provider-pills {
-  display: flex; gap: 6px; margin-bottom: 0.75rem; flex-wrap: wrap;
-}
-.provider-pill {
-  flex: 1; min-width: 70px; padding: 6px 10px; border-radius: var(--radius-pill);
-  font-family: var(--font-mono); font-size: 0.65rem; font-weight: 600;
-  text-align: center; cursor: pointer; border: 1px solid var(--c-border-2);
-  background: transparent; color: var(--c-text-muted);
-  transition: all var(--transition); white-space: nowrap;
-}
-.provider-pill.active {
-  background: var(--c-green-800); border-color: var(--c-green-500);
-  color: #ffffff; box-shadow: 0 0 0 2px rgba(74,101,38,.2);
-}
-.provider-pill:hover:not(.active) {
-  border-color: var(--c-green-500); color: var(--c-green-400);
+  font-family: var(--font-body); font-size: 0.72rem; font-weight: 600;
+  letter-spacing: 1px; text-transform: uppercase;
+  color: var(--c-text-muted); padding: 0.75rem 0 0.4rem 0;
+  margin-bottom: 0.5rem;
 }
 
 /* Connection dot */
@@ -1420,93 +1392,61 @@ section[data-testid="stSidebar"] > div { padding-top: 0 !important; }
   display: inline-block; width: 8px; height: 8px; border-radius: 50%;
   margin-right: 6px; flex-shrink: 0;
 }
-.conn-dot.online  { background: var(--c-success); box-shadow: 0 0 5px rgba(46,125,50,.4); }
-.conn-dot.offline { background: var(--c-error);   box-shadow: 0 0 5px rgba(198,40,40,.4); }
-.conn-dot.unknown { background: var(--c-warning);  box-shadow: 0 0 5px rgba(230,81,0,.4); }
+.conn-dot.online  { background: var(--c-success); box-shadow: 0 0 5px rgba(16,185,129,.4); }
+.conn-dot.offline { background: var(--c-error);   box-shadow: 0 0 5px rgba(239,68,68,.4); }
+.conn-dot.unknown { background: var(--c-warning);  box-shadow: 0 0 5px rgba(245,158,11,.4); }
 
-/* Streamlit input overrides */
+/* Streamlit input overrides — sidebar */
 section[data-testid="stSidebar"] .stTextInput input,
 section[data-testid="stSidebar"] .stSelectbox select {
   background: var(--c-surface) !important;
-  border: 1px solid var(--c-border-2) !important;
+  border: 1px solid var(--c-border) !important;
   border-radius: var(--radius-sm) !important;
-  color: var(--c-text) !important; font-family: var(--font-mono) !important;
-  font-size: 0.8rem !important;
+  color: var(--c-text) !important;
+  font-size: 0.85rem !important;
 }
 section[data-testid="stSidebar"] .stTextInput input:focus,
 section[data-testid="stSidebar"] .stSelectbox select:focus {
-  border-color: var(--c-green-500) !important;
-  box-shadow: 0 0 0 2px rgba(92,122,48,.2) !important;
+  border-color: var(--c-primary) !important;
+  box-shadow: 0 0 0 3px rgba(37,99,235,.12) !important;
 }
 section[data-testid="stSidebar"] label {
-  color: var(--c-text-3) !important; font-size: 0.75rem !important;
-  font-family: var(--font-mono) !important; letter-spacing: .5px;
+  color: var(--c-text-3) !important; font-size: 0.78rem !important;
 }
-
-/* KB stat chips */
-.kb-stat {
-  display: inline-flex; align-items: center; gap: 4px;
-  background: var(--c-green-900); border: 1px solid var(--c-green-800);
-  border-radius: var(--radius-pill); padding: 2px 10px;
-  font-family: var(--font-mono); font-size: 0.7rem; color: var(--c-green-400);
-}
-.kb-stat strong { color: var(--c-green-300); margin-left: 2px; }
-
-/* Source chip in sidebar */
-.src-chip {
-  display: flex; align-items: center; gap: 6px;
-  background: var(--c-surface); border: 1px solid var(--c-border);
-  border-radius: var(--radius-sm); padding: 5px 8px; margin: 3px 0;
-  font-family: var(--font-mono); font-size: 0.72rem; color: var(--c-text-3);
-  transition: all var(--transition);
-}
-.src-chip:hover { border-color: var(--c-green-500); color: var(--c-green-400); background: var(--c-green-900); }
-.src-chip-icon { color: var(--c-green-500); font-size: 0.8rem; }
 
 /* ── Top bar ──────────────────────────────────────────────────────────── */
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
-  background: linear-gradient(90deg, #3a5020 0%, #4b6526 50%, #5c7a30 100%);
-  border: 1px solid #3a5020; border-radius: var(--radius-lg);
-  padding: 0.75rem 1.25rem; margin-bottom: 1rem;
-  box-shadow: var(--shadow-md);
-  position: relative; overflow: hidden;
+  background: #ffffff;
+  border: 1px solid var(--c-border); border-radius: var(--radius-lg);
+  padding: 0.7rem 1.25rem; margin-bottom: 1rem;
+  box-shadow: var(--shadow-sm);
 }
-.topbar::before {
-  content: ''; position: absolute; inset: 0;
-  background: repeating-linear-gradient(
-    60deg, transparent, transparent 30px,
-    rgba(255,255,255,.03) 30px, rgba(255,255,255,.03) 60px
-  );
-  pointer-events: none;
-}
-.topbar-left { display: flex; align-items: center; gap: 14px; z-index: 1; }
+.topbar-left { display: flex; align-items: center; gap: 14px; }
 .topbar-logo {
-  font-family: var(--font-mono); font-size: 1.35rem; font-weight: 700;
-  color: #ffffff; letter-spacing: 1px; line-height: 1;
+  font-family: var(--font-body); font-size: 1.15rem; font-weight: 700;
+  color: var(--c-text); line-height: 1;
 }
-.topbar-logo span { color: #c8dba0; }
+.topbar-logo span { color: var(--c-primary); }
 .topbar-sub {
-  font-size: 0.72rem; color: rgba(255,255,255,.65);
-  font-family: var(--font-mono); letter-spacing: .5px;
+  font-size: 0.72rem; color: var(--c-text-muted); letter-spacing: .3px;
 }
 .topbar-divider {
-  width: 1px; height: 36px; background: rgba(255,255,255,.2); margin: 0 4px;
+  width: 1px; height: 28px; background: var(--c-border); margin: 0 4px;
 }
-.topbar-right { display: flex; align-items: center; gap: 8px; z-index: 1; flex-wrap: wrap; }
+.topbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
-/* Status pill — on dark topbar background */
+/* Status pill — on white topbar */
 .spill {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 4px 11px; border-radius: var(--radius-pill);
-  font-family: var(--font-mono); font-size: 0.68rem; font-weight: 600;
-  letter-spacing: .5px; white-space: nowrap;
-  transition: all var(--transition);
+  font-size: 0.72rem; font-weight: 500;
+  white-space: nowrap; transition: all var(--transition);
 }
-.spill-ok    { background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.35); color: #d4f0b8; }
-.spill-warn  { background: rgba(255,200,0,.2);   border: 1px solid rgba(255,200,0,.5);    color: #ffe082; }
-.spill-err   { background: rgba(255,100,100,.2); border: 1px solid rgba(255,100,100,.5);  color: #ffcdd2; }
-.spill-info  { background: rgba(180,230,255,.15); border: 1px solid rgba(180,230,255,.4); color: #b3e5fc; }
+.spill-ok    { background: var(--c-success-light); border: 1px solid rgba(16,185,129,.25); color: #065f46; }
+.spill-warn  { background: var(--c-accent-light);  border: 1px solid rgba(245,158,11,.25); color: #92400e; }
+.spill-err   { background: var(--c-error-light);   border: 1px solid rgba(239,68,68,.25);  color: #991b1b; }
+.spill-info  { background: var(--c-primary-light);  border: 1px solid rgba(37,99,235,.15);  color: #1e40af; }
 
 /* Pulse animation for live status */
 @keyframes pulse {
@@ -1521,87 +1461,87 @@ section[data-testid="stSidebar"] label {
   padding: 3px; width: fit-content; margin: 0 auto 1rem auto;
 }
 .mode-tab {
-  padding: 6px 18px; border-radius: var(--radius-pill); border: none;
-  font-family: var(--font-mono); font-size: 0.75rem; font-weight: 600;
+  padding: 6px 20px; border-radius: var(--radius-pill); border: none;
+  font-size: 0.8rem; font-weight: 500;
   cursor: pointer; transition: all var(--transition);
-  background: transparent; color: var(--c-text-muted); letter-spacing: .3px;
+  background: transparent; color: var(--c-text-muted);
 }
 .mode-tab.active {
-  background: var(--c-green-500); color: #ffffff;
+  background: var(--c-primary); color: #ffffff;
   box-shadow: var(--shadow-sm);
 }
-.mode-tab:hover:not(.active) { color: var(--c-green-400); background: var(--c-green-900); }
+.mode-tab:hover:not(.active) { color: var(--c-primary); background: var(--c-primary-light); }
 
 /* ── Welcome screen ───────────────────────────────────────────────────── */
 .welcome-wrap {
   max-width: 860px; margin: 2rem auto; padding: 0 1rem; text-align: center;
 }
 .welcome-title {
-  font-family: var(--font-mono); font-size: 1.6rem; font-weight: 700;
-  color: var(--c-green-300); letter-spacing: 1px; margin-bottom: .5rem;
+  font-size: 1.75rem; font-weight: 700;
+  color: var(--c-text); margin-bottom: .5rem;
 }
 .welcome-sub {
-  color: var(--c-text-3); font-size: 0.95rem; line-height: 1.7;
-  max-width: 580px; margin: 0 auto 2rem auto;
+  color: var(--c-text-muted); font-size: 1rem; line-height: 1.7;
+  max-width: 560px; margin: 0 auto 2rem auto;
 }
-.step-cards { display: flex; gap: 16px; margin-top: 1.5rem; flex-wrap: wrap; }
+.step-cards { display: flex; gap: 16px; margin-top: 1.5rem; flex-wrap: wrap; justify-content: center; }
 .step-card {
-  flex: 1; min-width: 220px;
-  background: var(--c-surface); border: 1px solid var(--c-border);
-  border-radius: var(--radius-lg); padding: 1.25rem;
+  flex: 1; min-width: 220px; max-width: 280px;
+  background: #ffffff; border: 1px solid var(--c-border);
+  border-radius: var(--radius-lg); padding: 1.5rem;
   transition: all var(--transition); text-align: left;
   position: relative; overflow: hidden;
 }
 .step-card::before {
   content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
-  background: linear-gradient(90deg, var(--c-green-500), var(--c-green-700));
+  background: linear-gradient(90deg, var(--c-primary), var(--c-secondary));
   transform: scaleX(0); transform-origin: left;
   transition: transform 0.3s ease;
 }
 .step-card:hover::before { transform: scaleX(1); }
-.step-card:hover { border-color: var(--c-green-600); transform: translateY(-2px); box-shadow: var(--shadow-md); }
-.step-card.done { border-color: rgba(46,125,50,.5); }
+.step-card:hover { border-color: var(--c-primary-muted); transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.step-card.done { border-color: rgba(16,185,129,.5); }
 .step-card.done::before { transform: scaleX(1); background: var(--c-success); }
 .step-num {
-  font-family: var(--font-mono); font-size: 0.65rem; font-weight: 700;
-  color: var(--c-green-500); letter-spacing: 2px; text-transform: uppercase;
+  font-size: 0.68rem; font-weight: 600;
+  color: var(--c-primary); letter-spacing: 1.5px; text-transform: uppercase;
   margin-bottom: 0.5rem;
 }
-.step-icon { font-size: 1.6rem; margin-bottom: 0.5rem; display: block; }
+.step-icon { font-size: 1.8rem; margin-bottom: 0.6rem; display: block; }
 .step-title {
-  font-family: var(--font-mono); font-size: 0.9rem; font-weight: 600;
+  font-size: 0.95rem; font-weight: 600;
   color: var(--c-text); margin-bottom: 0.35rem;
 }
-.step-desc { font-size: 0.8rem; color: var(--c-text-3); line-height: 1.5; }
+.step-desc { font-size: 0.83rem; color: var(--c-text-muted); line-height: 1.55; }
 .step-badge {
   display: inline-flex; align-items: center; gap: 4px;
-  font-size: 0.68rem; font-family: var(--font-mono); font-weight: 600;
-  padding: 2px 8px; border-radius: var(--radius-pill); margin-top: 0.5rem;
+  font-size: 0.7rem; font-weight: 600;
+  padding: 3px 10px; border-radius: var(--radius-pill); margin-top: 0.6rem;
 }
-.step-badge.done    { background: rgba(46,125,50,.12); color: #2e7d32; border: 1px solid rgba(46,125,50,.3); }
-.step-badge.pending { background: rgba(230,81,0,.08);  color: #e65100; border: 1px solid rgba(230,81,0,.3); }
+.step-badge.done    { background: var(--c-success-light); color: #065f46; border: 1px solid rgba(16,185,129,.3); }
+.step-badge.pending { background: var(--c-accent-light);  color: #92400e; border: 1px solid rgba(245,158,11,.3); }
 
 /* ── Quick actions ────────────────────────────────────────────────────── */
 .qa-section-label {
-  font-family: var(--font-mono); font-size: 0.68rem; font-weight: 700;
-  letter-spacing: 2px; color: var(--c-green-500); text-transform: uppercase;
-  margin-bottom: 0.6rem; display: flex; align-items: center; gap: 6px;
+  font-size: 0.72rem; font-weight: 600;
+  letter-spacing: 1px; color: var(--c-text-muted); text-transform: uppercase;
+  margin-bottom: 0.75rem; display: flex; align-items: center; gap: 6px;
 }
-.qa-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 1rem; }
+.qa-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 1rem; }
 .qa-btn {
-  display: flex; align-items: center; gap: 8px;
-  background: var(--c-surface); border: 1px solid var(--c-border);
-  border-radius: var(--radius-md); padding: 8px 12px;
-  font-family: var(--font-body); font-size: 0.8rem; font-weight: 500;
+  display: flex; align-items: center; gap: 10px;
+  background: #ffffff; border: 1px solid var(--c-border);
+  border-radius: var(--radius-md); padding: 12px 14px;
+  font-size: 0.83rem; font-weight: 500;
   color: var(--c-text-2); cursor: pointer; transition: all var(--transition);
   text-align: left; width: 100%;
 }
 .qa-btn:hover {
-  background: var(--c-green-900); border-color: var(--c-green-600);
-  color: var(--c-green-400); transform: translateY(-1px); box-shadow: var(--shadow-sm);
+  background: var(--c-primary-light); border-color: var(--c-primary-muted);
+  color: var(--c-primary); transform: translateY(-1px); box-shadow: var(--shadow-sm);
 }
-.qa-btn-icon { font-size: 1rem; flex-shrink: 0; }
-.qa-btn-text { line-height: 1.2; }
+.qa-btn-icon { font-size: 1.1rem; flex-shrink: 0; }
+.qa-btn-text { line-height: 1.3; }
 
 /* ── Chat messages ────────────────────────────────────────────────────── */
 .stChatMessage {
@@ -1615,7 +1555,7 @@ section[data-testid="stSidebar"] label {
 
 /* Source reference panel */
 .src-panel {
-  background: var(--c-surface); border: 1px solid var(--c-border);
+  background: #ffffff; border: 1px solid var(--c-border);
   border-radius: var(--radius-md); padding: 0; margin-top: 0.5rem;
   overflow: hidden;
 }
@@ -1623,8 +1563,8 @@ section[data-testid="stSidebar"] label {
   display: flex; align-items: center; justify-content: space-between;
   padding: 8px 12px; background: var(--c-surface-2);
   border-bottom: 1px solid var(--c-border);
-  font-family: var(--font-mono); font-size: 0.72rem; font-weight: 600;
-  color: var(--c-green-400); cursor: pointer;
+  font-size: 0.75rem; font-weight: 600;
+  color: var(--c-primary); cursor: pointer;
 }
 .src-ref-row {
   display: flex; align-items: flex-start; gap: 10px;
@@ -1632,25 +1572,25 @@ section[data-testid="stSidebar"] label {
   transition: background var(--transition);
 }
 .src-ref-row:last-child { border-bottom: none; }
-.src-ref-row:hover { background: var(--c-green-900); }
+.src-ref-row:hover { background: var(--c-primary-light); }
 .src-ref-num {
   font-family: var(--font-mono); font-size: 0.65rem; font-weight: 700;
-  background: var(--c-green-600); color: #ffffff;
-  border-radius: var(--radius-sm); padding: 1px 6px; flex-shrink: 0; margin-top: 2px;
+  background: var(--c-primary); color: #ffffff;
+  border-radius: var(--radius-sm); padding: 2px 7px; flex-shrink: 0; margin-top: 2px;
 }
 .src-ref-meta { flex: 1; min-width: 0; }
 .src-ref-file {
-  font-family: var(--font-mono); font-size: 0.72rem; color: var(--c-tan);
+  font-size: 0.75rem; color: var(--c-text-2);
   font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.src-ref-page { font-size: 0.7rem; color: var(--c-text-muted); margin-top: 1px; }
-.src-ref-text { font-size: 0.75rem; color: var(--c-text-3); margin-top: 4px; line-height: 1.45; }
+.src-ref-page { font-size: 0.72rem; color: var(--c-text-muted); margin-top: 1px; }
+.src-ref-text { font-size: 0.78rem; color: var(--c-text-3); margin-top: 4px; line-height: 1.5; }
 .relevance-bar {
   width: 60px; flex-shrink: 0; text-align: right;
 }
 .relevance-val {
   font-family: var(--font-mono); font-size: 0.65rem; font-weight: 700;
-  color: var(--c-green-500);
+  color: var(--c-primary);
 }
 .relevance-track {
   width: 100%; height: 3px; background: var(--c-border);
@@ -1658,46 +1598,46 @@ section[data-testid="stSidebar"] label {
 }
 .relevance-fill {
   height: 100%; border-radius: 2px;
-  background: linear-gradient(90deg, var(--c-green-500), var(--c-green-700));
+  background: linear-gradient(90deg, var(--c-primary), var(--c-secondary));
 }
 
 /* ── Streamlit widget overrides ───────────────────────────────────────── */
 /* Buttons */
 .stButton > button {
-  background: var(--c-surface) !important;
-  border: 1px solid var(--c-border-2) !important;
+  background: #ffffff !important;
+  border: 1px solid var(--c-border) !important;
   color: var(--c-text-2) !important; border-radius: var(--radius-md) !important;
-  font-family: var(--font-body) !important; font-size: 0.82rem !important;
+  font-family: var(--font-body) !important; font-size: 0.85rem !important;
   font-weight: 500 !important; transition: all var(--transition) !important;
-  padding: 0.4rem 0.9rem !important;
+  padding: 0.45rem 1rem !important;
 }
 .stButton > button:hover {
-  background: var(--c-green-900) !important;
-  border-color: var(--c-green-500) !important;
-  color: var(--c-green-400) !important;
+  background: var(--c-primary-light) !important;
+  border-color: var(--c-primary-muted) !important;
+  color: var(--c-primary) !important;
   transform: translateY(-1px) !important;
   box-shadow: var(--shadow-sm) !important;
 }
 .stButton > button[kind="primary"] {
-  background: var(--c-green-500) !important;
-  border-color: var(--c-green-400) !important;
+  background: var(--c-primary) !important;
+  border-color: var(--c-primary) !important;
   color: #ffffff !important;
 }
 .stButton > button[kind="primary"]:hover {
-  background: var(--c-green-400) !important;
+  background: var(--c-primary-hover) !important;
 }
 
 /* Chat input */
 .stChatInput textarea {
-  background: var(--c-surface) !important;
-  border: 1px solid var(--c-border-2) !important;
+  background: #ffffff !important;
+  border: 1px solid var(--c-border) !important;
   border-radius: var(--radius-md) !important;
   color: var(--c-text) !important; font-family: var(--font-body) !important;
-  font-size: 0.9rem !important;
+  font-size: 0.92rem !important;
 }
 .stChatInput textarea:focus {
-  border-color: var(--c-green-500) !important;
-  box-shadow: 0 0 0 2px rgba(92,122,48,.2) !important;
+  border-color: var(--c-primary) !important;
+  box-shadow: 0 0 0 3px rgba(37,99,235,.12) !important;
 }
 
 /* Expanders */
@@ -1706,10 +1646,10 @@ section[data-testid="stSidebar"] label {
   border: 1px solid var(--c-border) !important;
   border-radius: var(--radius-md) !important;
   color: var(--c-text-2) !important;
-  font-family: var(--font-mono) !important; font-size: 0.8rem !important;
+  font-size: 0.82rem !important;
 }
 .streamlit-expanderContent {
-  background: var(--c-surface) !important;
+  background: #ffffff !important;
   border: 1px solid var(--c-border) !important;
   border-top: none !important;
   border-radius: 0 0 var(--radius-md) var(--radius-md) !important;
@@ -1717,32 +1657,80 @@ section[data-testid="stSidebar"] label {
 
 /* Metrics */
 [data-testid="stMetric"] {
-  background: var(--c-surface); border: 1px solid var(--c-border);
+  background: #ffffff; border: 1px solid var(--c-border);
   border-radius: var(--radius-md); padding: 10px 14px;
 }
 [data-testid="stMetricLabel"] { color: var(--c-text-muted) !important; font-size: 0.72rem !important; }
-[data-testid="stMetricValue"] { color: var(--c-green-400) !important; font-family: var(--font-mono) !important; }
+[data-testid="stMetricValue"] { color: var(--c-primary) !important; font-family: var(--font-mono) !important; }
 
 /* Alerts */
-.stSuccess { background: rgba(46,125,50,.08)  !important; border-color: rgba(46,125,50,.3)   !important; color: #1b5e20 !important; border-radius: var(--radius-md) !important; }
-.stWarning { background: rgba(230,81,0,.08)   !important; border-color: rgba(230,81,0,.3)    !important; color: #bf360c !important; border-radius: var(--radius-md) !important; }
-.stError   { background: rgba(198,40,40,.08)  !important; border-color: rgba(198,40,40,.3)   !important; color: #7f0000 !important; border-radius: var(--radius-md) !important; }
-.stInfo    { background: rgba(21,101,192,.08) !important; border-color: rgba(21,101,192,.3)  !important; color: #0d47a1 !important; border-radius: var(--radius-md) !important; }
+.stSuccess { background: var(--c-success-light) !important; border-color: rgba(16,185,129,.3) !important; color: #065f46 !important; border-radius: var(--radius-md) !important; }
+.stWarning { background: var(--c-accent-light)  !important; border-color: rgba(245,158,11,.3) !important; color: #92400e !important; border-radius: var(--radius-md) !important; }
+.stError   { background: var(--c-error-light)   !important; border-color: rgba(239,68,68,.3)  !important; color: #991b1b !important; border-radius: var(--radius-md) !important; }
+.stInfo    { background: var(--c-primary-light)  !important; border-color: rgba(37,99,235,.2)  !important; color: #1e40af !important; border-radius: var(--radius-md) !important; }
 
 /* Radio */
-.stRadio label { color: var(--c-text-2) !important; font-size: 0.82rem !important; }
-.stRadio [data-testid="stMarkdownContainer"] p { font-size: 0.82rem !important; }
+.stRadio label { color: var(--c-text-2) !important; font-size: 0.85rem !important; }
+.stRadio [data-testid="stMarkdownContainer"] p { font-size: 0.85rem !important; }
 
 /* Divider */
 hr { border-color: var(--c-border) !important; margin: 0.5rem 0 !important; }
 
 /* File uploader */
 [data-testid="stFileUploader"] {
-  background: var(--c-surface) !important;
+  background: #ffffff !important;
   border: 1px dashed var(--c-border-2) !important;
   border-radius: var(--radius-md) !important;
 }
-[data-testid="stFileUploader"]:hover { border-color: var(--c-green-500) !important; }
+[data-testid="stFileUploader"]:hover { border-color: var(--c-primary) !important; }
+
+/* Tabs styling */
+.stTabs [data-baseweb="tab-list"] {
+  gap: 4px; background: var(--c-surface-2);
+  border-radius: var(--radius-md); padding: 4px;
+}
+.stTabs [data-baseweb="tab"] {
+  border-radius: var(--radius-sm); font-size: 0.82rem; font-weight: 500;
+  color: var(--c-text-muted);
+}
+.stTabs [aria-selected="true"] {
+  background: #ffffff !important; color: var(--c-primary) !important;
+  box-shadow: var(--shadow-sm);
+}
+
+/* Settings page styles */
+.settings-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.75rem 0; margin-bottom: 1rem;
+}
+.settings-title {
+  font-size: 1.25rem; font-weight: 700; color: var(--c-text);
+}
+.settings-card {
+  background: #ffffff; border: 1px solid var(--c-border);
+  border-radius: var(--radius-lg); padding: 1.25rem;
+  margin-bottom: 1rem;
+}
+
+/* ── Responsive — Tablet ──────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .step-cards { flex-direction: column; }
+  .step-card { min-width: unset; max-width: unset; }
+  .qa-grid { grid-template-columns: 1fr; }
+  .qa-btn { padding: 14px 16px; }
+  .topbar { flex-direction: column; gap: 8px; text-align: center; }
+  .topbar-left { flex-direction: column; gap: 6px; }
+  .topbar-divider { display: none; }
+  .topbar-right { justify-content: center; }
+}
+
+/* ── Responsive — Phone ───────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  .welcome-wrap { margin: 1rem auto; }
+  .welcome-title { font-size: 1.3rem; }
+  .topbar { padding: 0.5rem 0.75rem; }
+  .spill { font-size: 0.65rem; padding: 3px 8px; }
+}
 </style>
 """
 
@@ -1788,6 +1776,7 @@ def init_session():
     for k, v in {
         "messages": [], "vehicle_variant": "", "maintenance_category": "",
         "mode": "chat", "show_sources": True,
+        "current_page": "chat",
     }.items():
         if k not in st.session_state:
             st.session_state[k] = v
@@ -1967,50 +1956,52 @@ def _build_pipeline_status_html(status: dict, t_start: float, done: bool = False
     rows = ""
     for num in range(1, 7):
         name, emoji, color = MultiAgentPipeline.AGENT_META[num]
-        msg, _t0 = status.get(num, ("⏳ Waiting", t_start))
+        msg, _t0 = status.get(num, ("Waiting...", t_start))
         if msg.startswith("✅"):
-            icon_html = f'<span style="color:#2e7d32;font-size:13px">✅</span>'
-            msg_color = "#2e7d32"
+            icon_html = '<span style="color:#10b981;font-size:13px">✅</span>'
+            msg_color = "#065f46"
         elif msg.startswith("🔄"):
             icon_html = (
                 '<span style="display:inline-block;width:10px;height:10px;'
-                'border-radius:50%;background:#5c7a30;'
-                'animation:spin .8s linear infinite"></span>'
+                'border:2px solid #2563eb;border-top-color:transparent;'
+                'border-radius:50%;animation:spin .6s linear infinite"></span>'
             )
-            msg_color = "#5c7a30"
+            msg_color = "#1e40af"
         elif msg.startswith("❌"):
-            icon_html = f'<span style="color:#c62828;font-size:13px">❌</span>'
-            msg_color = "#c62828"
+            icon_html = '<span style="color:#ef4444;font-size:13px">✗</span>'
+            msg_color = "#991b1b"
         elif msg.startswith("⏭️"):
-            icon_html = f'<span style="color:#7b1fa2;font-size:13px">⏭️</span>'
-            msg_color = "#7b1fa2"
+            icon_html = '<span style="color:#64748b;font-size:13px">—</span>'
+            msg_color = "#64748b"
         else:
-            icon_html = f'<span style="color:#9e9e9e;font-size:13px">⏳</span>'
-            msg_color = "#9e9e9e"
+            icon_html = '<span style="color:#cbd5e1;font-size:13px">○</span>'
+            msg_color = "#94a3b8"
 
         badge = (
             f'<span style="display:inline-flex;align-items:center;gap:4px;'
-            f'background:{color}18;border:1px solid {color}44;border-radius:4px;'
-            f'padding:1px 7px;font-family:monospace;font-size:0.65rem;'
-            f'color:{color};font-weight:700;margin-right:6px">'
+            f'background:{color}10;border:1px solid {color}30;border-radius:6px;'
+            f'padding:2px 8px;font-size:0.7rem;'
+            f'color:{color};font-weight:600;margin-right:6px">'
             f'{emoji} {name}</span>'
         )
         rows += (
-            f'<div style="display:flex;align-items:center;gap:6px;'
-            f'padding:5px 8px;border-bottom:1px solid #e8ebe2;">'
+            f'<div style="display:flex;align-items:center;gap:8px;'
+            f'padding:6px 10px;border-bottom:1px solid #f1f5f9;">'
             f'{icon_html}{badge}'
-            f'<span style="font-size:0.72rem;color:{msg_color};flex:1">{html_mod.escape(msg)}</span>'
+            f'<span style="font-size:0.75rem;color:{msg_color};flex:1">{html_mod.escape(msg)}</span>'
             f'</div>'
         )
 
-    status_label = "✅ Pipeline complete" if done else f"🤖 Running pipeline… ({elapsed_total:.1f}s)"
+    status_label = "Complete" if done else f"Running... ({elapsed_total:.1f}s)"
+    header_bg = "#ecfdf5" if done else "#eff6ff"
+    header_color = "#065f46" if done else "#1e40af"
     return (
-        f'<div style="border:1px solid #d0d5c8;border-radius:8px;overflow:hidden;'
-        f'font-family:system-ui,sans-serif;margin:6px 0;">'
-        f'<div style="background:linear-gradient(90deg,#3a5020,#4b6526);'
-        f'padding:6px 10px;font-size:0.72rem;font-weight:700;color:#d4dfc2;'
-        f'letter-spacing:1px;display:flex;justify-content:space-between;">'
-        f'<span>🤖 AGENT PIPELINE</span><span>{html_mod.escape(status_label)}</span></div>'
+        f'<div style="border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;'
+        f'font-family:Inter,system-ui,sans-serif;margin:6px 0;">'
+        f'<div style="background:{header_bg};'
+        f'padding:8px 12px;font-size:0.75rem;font-weight:600;color:{header_color};'
+        f'display:flex;justify-content:space-between;align-items:center;">'
+        f'<span>Agent Pipeline</span><span>{html_mod.escape(status_label)}</span></div>'
         f'{rows}'
         f'<style>@keyframes spin{{to{{transform:rotate(360deg)}}}}</style>'
         f'</div>'
@@ -2021,8 +2012,8 @@ def _agent_config_row(label: str, emoji: str, color: str,
                       agent_num: int, key_prefix: str):
     """Render a compact provider + model config row for one agent."""
     st.markdown(
-        f'<div style="display:flex;align-items:center;gap:6px;margin:6px 0 2px;'
-        f'font-family:var(--font-mono);font-size:0.68rem;font-weight:700;'
+        f'<div style="display:flex;align-items:center;gap:6px;margin:8px 0 4px;'
+        f'font-size:0.78rem;font-weight:600;'
         f'color:{color};">{emoji} {label}</div>',
         unsafe_allow_html=True,
     )
@@ -2121,43 +2112,176 @@ def _agent_pipeline_section():
 
 def render_sidebar():
     with st.sidebar:
-        # Brand mark
+        # Brand mark — clean, modern
         st.markdown(
-            '<div style="padding:1rem 0 0.5rem;text-align:center;">'
-            '<div style="font-family:var(--font-mono);font-size:1.1rem;font-weight:700;'
-            'color:var(--c-tan-light);letter-spacing:2px;">🔧 HMMWV</div>'
-            '<div style="font-family:var(--font-mono);font-size:0.6rem;color:var(--c-tan-dim);'
-            'letter-spacing:3px;text-transform:uppercase;">Technical Assistant</div>'
+            '<div style="padding:1.25rem 0 0.75rem;text-align:center;">'
+            '<div style="font-size:1.15rem;font-weight:700;'
+            'color:var(--c-text);letter-spacing:0.5px;">HMMWV <span style="color:var(--c-primary)">Assistant</span></div>'
+            '<div style="font-size:0.7rem;color:var(--c-text-muted);margin-top:2px;">'
+            'AI-Powered Maintenance Guide</div>'
             '</div>',
             unsafe_allow_html=True,
         )
         st.divider()
 
-        _provider_section()
-        st.divider()
-
         # Vehicle
-        _sb_label("🚛", "VEHICLE")
+        _sb_label("🚛", "Vehicle")
         variant  = st.selectbox("Variant", ["(Auto-detect)"] + HMMWV_VARIANTS, label_visibility="collapsed")
         st.session_state.vehicle_variant = "" if variant == "(Auto-detect)" else variant
         category = st.selectbox("Category", ["(Any)"] + MAINTENANCE_CATEGORIES, label_visibility="collapsed")
         st.session_state.maintenance_category = "" if category == "(Any)" else category
+
         st.divider()
 
-        # Knowledge base
-        _sb_label("📚", "KNOWLEDGE BASE")
+        # Quick status
+        vs_stats = get_vector_store().get_stats()
+        proc_status = get_pdf_processor().get_processing_status()
+        prov = st.session_state.provider
+        st.markdown(
+            f'<div style="font-size:0.78rem;color:var(--c-text-muted);line-height:1.8;">'
+            f'<span class="conn-dot online" style="vertical-align:middle"></span> '
+            f'{html_mod.escape(prov)} &middot; {vs_stats["total_chunks"]:,} chunks &middot; '
+            f'{proc_status["total_pdfs"]} PDFs</div>',
+            unsafe_allow_html=True,
+        )
+
+        st.divider()
+
+        # Settings & Clear buttons
+        if st.button("⚙️  Settings", use_container_width=True):
+            st.session_state.current_page = "settings"
+            st.rerun()
+
+        if st.button("🗑️  Clear Chat", use_container_width=True):
+            st.session_state.messages = []
+            st.rerun()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SETTINGS PAGE
+# ═══════════════════════════════════════════════════════════════════════════
+
+def render_settings_page():
+    """Full-page settings with 4 tabs: AI Provider, Knowledge Base, YouTube, Agent Pipeline."""
+    st.markdown(GLOBAL_CSS, unsafe_allow_html=True)
+
+    # Header with back button
+    col_back, col_title = st.columns([1, 5])
+    with col_back:
+        if st.button("← Back", key="_settings_back"):
+            st.session_state.current_page = "chat"
+            st.rerun()
+    with col_title:
+        st.markdown(
+            '<div class="settings-title">Settings</div>',
+            unsafe_allow_html=True,
+        )
+
+    tab_ai, tab_kb, tab_yt, tab_agents = st.tabs([
+        "🤖 AI Provider", "📚 Knowledge Base", "▶️ YouTube", "🔗 Agent Pipeline"
+    ])
+
+    # ── Tab 1: AI Provider ──────────────────────────────────────────────
+    with tab_ai:
+        changed = False
+        provider = st.session_state.provider
+
+        new_provider = st.radio(
+            "AI Provider",
+            ALL_PROVIDERS,
+            index=ALL_PROVIDERS.index(provider) if provider in ALL_PROVIDERS else 0,
+            horizontal=True,
+            key="_settings_prov_radio",
+        )
+        if new_provider != provider:
+            st.session_state.provider = new_provider
+            provider = new_provider
+            changed = True
+
+        st.divider()
+
+        if provider == PROVIDER_OLLAMA:
+            ollama_url = st.text_input("Ollama URL", value=st.session_state.ollama_url,
+                                       key="_s_ollama_url")
+            if ollama_url != st.session_state.ollama_url:
+                st.session_state.ollama_url = ollama_url; changed = True
+
+            is_connected = AIEngine.check_ollama(ollama_url)
+            dot = "online" if is_connected else "offline"
+            status_text = "Connected" if is_connected else "Offline"
+            st.markdown(
+                f'<div style="display:flex;align-items:center;font-size:.78rem;'
+                f'color:var(--c-text-muted);margin:-4px 0 8px 0;">'
+                f'<span class="conn-dot {dot}"></span>{status_text}</div>',
+                unsafe_allow_html=True,
+            )
+            if is_connected:
+                models = AIEngine.list_ollama_models(ollama_url)
+                if models:
+                    cur_idx = models.index(st.session_state.ollama_model) if st.session_state.ollama_model in models else 0
+                    sel = st.selectbox("Model", models, index=cur_idx, key="_s_ollama_model_sel")
+                    if sel != st.session_state.ollama_model:
+                        st.session_state.ollama_model = sel; changed = True
+                else:
+                    m = st.text_input("Model", value=st.session_state.ollama_model, key="_s_ollama_model_txt")
+                    if m != st.session_state.ollama_model:
+                        st.session_state.ollama_model = m; changed = True
+                    st.caption("No models found — run `ollama pull gpt-oss:latest`")
+            else:
+                m = st.text_input("Model", value=st.session_state.ollama_model, key="_s_ollama_model_off")
+                if m != st.session_state.ollama_model:
+                    st.session_state.ollama_model = m; changed = True
+                st.caption("Start Ollama: `ollama serve`")
+
+        elif provider == PROVIDER_OPENAI:
+            u = st.text_input("Base URL", value=st.session_state.openai_url, key="_s_oai_url",
+                               help="e.g. https://api.openai.com/v1 or http://localhost:8000/v1")
+            if u != st.session_state.openai_url:
+                st.session_state.openai_url = u; changed = True
+            m = st.text_input("Model", value=st.session_state.openai_model, key="_s_oai_model",
+                               help="e.g. gpt-4o, gpt-4o-mini")
+            if m != st.session_state.openai_model:
+                st.session_state.openai_model = m; changed = True
+            k = st.text_input("API Key", value=st.session_state.openai_api_key, type="password",
+                               key="_s_oai_key", help="Leave blank for no-auth local endpoints")
+            if k != st.session_state.openai_api_key:
+                st.session_state.openai_api_key = k; changed = True
+            st.caption("Works with OpenAI, Together AI, Groq, vLLM, LM Studio")
+
+        elif provider == PROVIDER_ANTHROPIC:
+            k = st.text_input("API Key", value=st.session_state.anthropic_api_key,
+                               type="password", key="_s_ant_key", help="sk-ant-...")
+            if k != st.session_state.anthropic_api_key:
+                st.session_state.anthropic_api_key = k; changed = True
+            m = st.text_input("Model", value=st.session_state.anthropic_model, key="_s_ant_model",
+                               help="e.g. claude-opus-4-6")
+            if m != st.session_state.anthropic_model:
+                st.session_state.anthropic_model = m; changed = True
+            dot = "online" if st.session_state.anthropic_api_key else "offline"
+            status_text = "Key configured" if st.session_state.anthropic_api_key else "No API key"
+            st.markdown(
+                f'<div style="display:flex;align-items:center;font-size:.78rem;'
+                f'color:var(--c-text-muted);margin:-4px 0 8px 0;">'
+                f'<span class="conn-dot {dot}"></span>{status_text}</div>',
+                unsafe_allow_html=True,
+            )
+
+        if changed:
+            save_settings(_collect_settings())
+
+    # ── Tab 2: Knowledge Base ───────────────────────────────────────────
+    with tab_kb:
         proc     = get_pdf_processor()
         vs       = get_vector_store()
         vs_stats = vs.get_stats()
         status   = proc.get_processing_status()
 
-        # Stats row
         c1, c2 = st.columns(2)
         c1.metric("PDFs", status["total_pdfs"])
         c2.metric("Chunks", vs_stats["total_chunks"])
 
         uploaded = st.file_uploader("Upload TM PDFs", type=["pdf"], accept_multiple_files=True,
-                                    label_visibility="collapsed")
+                                    label_visibility="collapsed", key="_s_pdf_upload")
         if uploaded:
             for f in uploaded:
                 dest = KNOWLEDGE_BASE_DIR / f.name
@@ -2168,8 +2292,8 @@ def render_sidebar():
         unproc = status["unprocessed"]
         if unproc > 0:
             st.warning(f"{unproc} PDF(s) pending processing")
-            if st.button("⚙️ Process PDFs", width="stretch", type="primary"):
-                with st.spinner("Extracting text and images…"):
+            if st.button("Process PDFs", use_container_width=True, type="primary", key="_s_process"):
+                with st.spinner("Extracting text and images..."):
                     result = proc.process_all_pdfs()
                     if result["chunks"]:
                         vs.add_chunks(result["chunks"])
@@ -2178,66 +2302,127 @@ def render_sidebar():
         elif status["total_pdfs"] > 0:
             st.success("All PDFs indexed")
         else:
-            st.info(f"Drop PDFs into `knowledge_base/` or upload above.")
+            st.info("Drop PDFs into `knowledge_base/` or upload above.")
 
         if status["total_pdfs"] > 0:
-            with st.expander("⚙️ Advanced"):
-                st.caption("♻️ Reprocess to apply improved BM25 indexing with section headings.")
-                if st.button("♻️ Reprocess All", width="stretch"):
-                    with st.spinner("Reprocessing with improved BM25 indexer…"):
-                        vs.clear()
-                        result = proc.process_all_pdfs(force=True)
-                        if result["chunks"]: vs.add_chunks(result["chunks"])
-                        st.success(f"Reprocessed {result['total_pdfs']} PDFs · {result['total_chunks']} chunks")
-                        st.rerun()
-                st.toggle("Show source references", value=True, key="show_sources")
+            st.divider()
+            if st.button("Reprocess All PDFs", use_container_width=True, key="_s_reprocess",
+                          help="Re-index with improved BM25 + section headings"):
+                with st.spinner("Reprocessing..."):
+                    vs.clear()
+                    result = proc.process_all_pdfs(force=True)
+                    if result["chunks"]: vs.add_chunks(result["chunks"])
+                    st.success(f"Reprocessed {result['total_pdfs']} PDFs · {result['total_chunks']} chunks")
+                    st.rerun()
+
+            st.toggle("Show source references in chat", value=True, key="show_sources")
 
         if vs_stats["source_files"]:
             st.divider()
-            _sb_label("📑", "INDEXED SOURCES")
+            st.markdown("**Indexed Documents**")
             for src in vs_stats["source_files"]:
-                safe = html_mod.escape(src)
-                st.markdown(
-                    f'<div class="src-chip"><span class="src-chip-icon">📄</span>{safe}</div>',
-                    unsafe_allow_html=True,
-                )
+                st.markdown(f"- 📄 {src}")
 
-        # YouTube video search
-        st.divider()
-        _sb_label("▶", "YOUTUBE VIDEOS")
+    # ── Tab 3: YouTube ──────────────────────────────────────────────────
+    with tab_yt:
         yt_enabled = st.toggle(
-            "Search YouTube for related videos",
+            "Enable YouTube video search",
             value=st.session_state.get("youtube_enabled", True),
-            key="youtube_enabled",
+            key="_s_yt_enabled",
         )
+        if yt_enabled != st.session_state.get("youtube_enabled", True):
+            st.session_state.youtube_enabled = yt_enabled
+            save_settings(_collect_settings())
+
         if yt_enabled:
             yt_key = st.text_input(
                 "YouTube Data API v3 Key",
                 value=st.session_state.get("youtube_api_key", ""),
                 type="password",
-                placeholder="AIza…",
-                label_visibility="collapsed",
+                placeholder="AIza...",
+                key="_s_yt_key",
                 help="Get a free key at console.cloud.google.com → YouTube Data API v3",
             )
             if yt_key != st.session_state.get("youtube_api_key", ""):
                 st.session_state.youtube_api_key = yt_key
                 save_settings(_collect_settings())
+
             yt_n = st.slider(
-                "Max videos", min_value=1, max_value=6,
+                "Max videos per query", min_value=1, max_value=6,
                 value=st.session_state.get("youtube_max_results", 3),
-                key="youtube_max_results",
+                key="_s_yt_max",
             )
+            if yt_n != st.session_state.get("youtube_max_results", 3):
+                st.session_state.youtube_max_results = yt_n
+                save_settings(_collect_settings())
+
             if not st.session_state.get("youtube_api_key"):
-                st.caption("⚠️ Add an API key to enable video search.")
+                st.info("Add an API key to enable video search.")
 
-        # Agent Pipeline section
-        st.divider()
-        _agent_pipeline_section()
+    # ── Tab 4: Agent Pipeline ───────────────────────────────────────────
+    with tab_agents:
+        agent_mode = st.toggle(
+            "Enable Multi-Agent Pipeline",
+            value=st.session_state.get("agent_mode", False),
+            key="_s_agent_mode",
+            help="Routes queries through 6 specialized agents instead of a single LLM call.",
+        )
+        if agent_mode != st.session_state.get("agent_mode", False):
+            st.session_state.agent_mode = agent_mode
+            save_settings(_collect_settings())
 
-        st.divider()
-        if st.button("🗑️ Clear Chat", width="stretch"):
-            st.session_state.messages = []
-            st.rerun()
+        if not agent_mode:
+            st.info("Single-agent mode active. Enable above to use the 6-agent pipeline.")
+        else:
+            st.markdown(
+                '<div style="font-size:0.82rem;color:var(--c-text-muted);'
+                'background:var(--c-primary-light);border:1px solid rgba(37,99,235,.15);'
+                'border-radius:10px;padding:10px 14px;margin:8px 0 16px">'
+                'The pipeline runs <b>Procedure Writer</b>, <b>Safety Officer</b>, and '
+                '<b>Parts Specialist</b> in parallel, then <b>Simplifier</b> rewrites for '
+                'beginners, and <b>Editor</b> synthesizes the final answer.<br>'
+                '<span style="font-size:0.75rem">API keys are shared from the AI Provider tab.</span></div>',
+                unsafe_allow_html=True,
+            )
+
+            with st.expander("🔍 Agent 1 — Retriever", expanded=False):
+                a1_on = st.toggle(
+                    "Enable LLM re-ranking",
+                    value=st.session_state.get("agent1_enabled", False),
+                    key="_s_a1_enabled",
+                    help="Uses an LLM to re-rank BM25 results. Slower but may improve relevance.",
+                )
+                if a1_on != st.session_state.get("agent1_enabled", False):
+                    st.session_state.agent1_enabled = a1_on
+                    save_settings(_collect_settings())
+                if a1_on:
+                    _agent_config_row("Retriever", "🔍", "#3b82f6", 1, "s_a1")
+                else:
+                    st.caption("BM25 retrieval only (fast). Enable above for LLM re-ranking.")
+
+            with st.expander("⚙️🦺🔩 Agents 2/3/4 — Parallel Specialists", expanded=True):
+                st.caption("These three agents run simultaneously:")
+                _agent_config_row("Procedure Writer", "⚙️", "#10b981", 2, "s_a2")
+                st.divider()
+                _agent_config_row("Safety Officer", "🦺", "#ef4444", 3, "s_a3")
+                st.divider()
+                _agent_config_row("Parts Specialist", "🔩", "#0d9488", 4, "s_a4")
+
+            with st.expander("📝 Agent 5 — Simplifier", expanded=False):
+                a5_on = st.toggle(
+                    "Enable Simplifier",
+                    value=st.session_state.get("agent5_enabled", True),
+                    key="_s_a5_enabled",
+                    help="Rewrites procedures in plain language for inexperienced mechanics.",
+                )
+                if a5_on != st.session_state.get("agent5_enabled", True):
+                    st.session_state.agent5_enabled = a5_on
+                    save_settings(_collect_settings())
+                if a5_on:
+                    _agent_config_row("Simplifier", "📝", "#8b5cf6", 5, "s_a5")
+
+            with st.expander("✍️ Agent 6 — Editor / Synthesizer", expanded=False):
+                _agent_config_row("Editor", "✍️", "#2563eb", 6, "s_a6")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2251,45 +2436,35 @@ def render_topbar():
     has_data = stats["total_chunks"] > 0
 
     if prov == PROVIDER_OLLAMA:
-        ok    = AIEngine.check_ollama(st.session_state.ollama_url)
+        ok     = AIEngine.check_ollama(st.session_state.ollama_url)
         plabel = html_mod.escape(f"Ollama · {st.session_state.ollama_model}")
-        pcls   = "spill-ok" if ok else "spill-err"
-        pdot   = "🟢" if ok else "🔴"
     elif prov == PROVIDER_OPENAI:
-        ok    = bool(st.session_state.openai_url)
+        ok     = bool(st.session_state.openai_url)
         plabel = html_mod.escape(f"OpenAI · {st.session_state.openai_model}")
-        pcls   = "spill-ok" if ok else "spill-warn"
-        pdot   = "🟢" if ok else "🟡"
     elif prov == PROVIDER_ANTHROPIC:
-        ok    = bool(st.session_state.anthropic_api_key)
+        ok     = bool(st.session_state.anthropic_api_key)
         plabel = html_mod.escape(f"Claude · {st.session_state.anthropic_model}")
-        pcls   = "spill-ok" if ok else "spill-warn"
-        pdot   = "🟢" if ok else "🟡"
     else:
-        ok = False; plabel = "Unknown"; pcls = "spill-err"; pdot = "🔴"
+        ok = False; plabel = "Unknown"
 
+    pcls     = "spill-ok" if ok else "spill-err"
     kb_cls   = "spill-ok" if has_data else "spill-warn"
     kb_label = f"{stats['total_chunks']:,} chunks" if has_data else "No data"
-    v_label  = html_mod.escape((st.session_state.vehicle_variant or "All Variants").split("—")[0].strip())
-    mode_labels = {"chat": "💬 Chat", "diagnose": "🔍 Diagnose", "pmcs": "📋 PMCS"}
-    m_label  = mode_labels.get(st.session_state.mode, "💬 Chat")
 
     st.markdown(f"""
     <div class="topbar">
       <div class="topbar-left">
         <div>
-          <div class="topbar-logo">HMMWV<span> //</span> TM ASSIST</div>
-          <div class="topbar-sub">TM 9-2320-280 Series · RAG-Powered</div>
+          <div class="topbar-logo">HMMWV <span>Assistant</span></div>
+          <div class="topbar-sub">AI-Powered Maintenance Guide</div>
         </div>
         <div class="topbar-divider"></div>
         <span class="spill {pcls}">
           <span class="conn-dot {'online' if ok else 'offline'}"></span>{plabel}
         </span>
         <span class="spill {kb_cls}">📦 {kb_label}</span>
-        <span class="spill spill-info">🚛 {v_label}</span>
       </div>
       <div class="topbar-right">
-        <span class="spill spill-info">{m_label}</span>
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -2326,53 +2501,52 @@ def render_welcome():
     prov = st.session_state.provider
     if prov == PROVIDER_OLLAMA:
         pok   = AIEngine.check_ollama(st.session_state.ollama_url)
-        pdesc = f"Connected · `{st.session_state.ollama_model}`" if pok else "Start Ollama: `ollama serve`"
+        pdesc = f"Connected to {st.session_state.ollama_model}" if pok else "Set up in Settings"
     elif prov == PROVIDER_OPENAI:
         pok   = bool(st.session_state.openai_url)
-        pdesc = f"`{st.session_state.openai_model}` via OpenAI-compatible endpoint" if pok else "Enter Base URL in sidebar"
+        pdesc = f"{st.session_state.openai_model} ready" if pok else "Set up in Settings"
     elif prov == PROVIDER_ANTHROPIC:
         pok   = bool(st.session_state.anthropic_api_key)
-        pdesc = f"Claude · `{st.session_state.anthropic_model}`" if pok else "Enter Anthropic API key in sidebar"
+        pdesc = f"Claude {st.session_state.anthropic_model} ready" if pok else "Set up in Settings"
     else:
-        pok = False; pdesc = "Select a provider in the sidebar"
+        pok = False; pdesc = "Set up in Settings"
 
     has_data = get_vector_store().get_stats()["total_chunks"] > 0
 
     step1_cls  = "done" if pok       else ""
     step2_cls  = "done" if has_data  else ""
     step3_cls  = "done" if (pok and has_data) else ""
-    s1_badge   = '<span class="step-badge done">✓ Ready</span>' if pok       else '<span class="step-badge pending">⬤ Pending</span>'
-    s2_badge   = '<span class="step-badge done">✓ Loaded</span>' if has_data  else '<span class="step-badge pending">⬤ Pending</span>'
-    s3_badge   = '<span class="step-badge done">✓ Ready</span>' if (pok and has_data) else '<span class="step-badge pending">⬤ Pending</span>'
+    s1_badge   = '<span class="step-badge done">Ready</span>' if pok       else '<span class="step-badge pending">Set up</span>'
+    s2_badge   = '<span class="step-badge done">Loaded</span>' if has_data  else '<span class="step-badge pending">Upload PDFs</span>'
+    s3_badge   = '<span class="step-badge done">Ready</span>' if (pok and has_data) else '<span class="step-badge pending">Almost there</span>'
 
     st.markdown(f"""
     <div class="welcome-wrap">
-      <div class="welcome-title">Welcome, Mechanic</div>
+      <div class="welcome-title">Welcome to your HMMWV Assistant</div>
       <div class="welcome-sub">
-        Your AI-powered HMMWV technical assistant. Upload official Technical Manuals,
-        then ask anything — maintenance procedures, torque specs, diagnostics, and PMCS checklists.
-        All answers are grounded in your TM library.
+        Get step-by-step maintenance procedures, diagnostics, and PMCS checklists
+        — all based on your official Technical Manuals.
       </div>
       <div class="step-cards">
         <div class="step-card {step1_cls}">
-          <div class="step-num">Step 01</div>
+          <div class="step-num">Step 1</div>
           <span class="step-icon">🤖</span>
-          <div class="step-title">Configure AI Provider</div>
+          <div class="step-title">Connect AI</div>
           <div class="step-desc">{html_mod.escape(pdesc)}</div>
           {s1_badge}
         </div>
         <div class="step-card {step2_cls}">
-          <div class="step-num">Step 02</div>
+          <div class="step-num">Step 2</div>
           <span class="step-icon">📚</span>
-          <div class="step-title">Load Technical Manuals</div>
-          <div class="step-desc">Upload TM 9-2320-280 PDFs via the sidebar or drop them in <code>knowledge_base/</code></div>
+          <div class="step-title">Upload Manuals</div>
+          <div class="step-desc">Add your TM PDFs in Settings or drop them into the knowledge_base folder.</div>
           {s2_badge}
         </div>
         <div class="step-card {step3_cls}">
-          <div class="step-num">Step 03</div>
-          <span class="step-icon">🔧</span>
-          <div class="step-title">Ask Away</div>
-          <div class="step-desc">Use the chat below, or pick a quick action to get started immediately.</div>
+          <div class="step-num">Step 3</div>
+          <span class="step-icon">💬</span>
+          <div class="step-title">Ask Anything</div>
+          <div class="step-desc">Type a question below or pick a quick action to get started.</div>
           {s3_badge}
         </div>
       </div>
@@ -2417,7 +2591,7 @@ def render_quick_actions():
     cols = st.columns(3)
     for i, (icon, label, prompt) in enumerate(current):
         with cols[i % 3]:
-            if st.button(f"{icon}  {label}", width="stretch", key=f"qa_{i}"):
+            if st.button(f"{icon}  {label}", use_container_width=True, key=f"qa_{i}"):
                 return prompt
     return None
 
@@ -2438,9 +2612,9 @@ def render_sources(search_results: list):
             page      = meta.get("page_number", "?")
             distance  = result.get("distance", 0)
             relevance = max(0.0, 1.0 - distance) * 100
-            snippet   = html_mod.escape(result["text"][:220].replace("\n", " "))
+            snippet   = html_mod.escape(result["text"][:260].replace("\n", " "))
             bar_w     = f"{relevance:.0f}%"
-            ellipsis  = "…" if len(result["text"]) > 220 else ""
+            ellipsis  = "..." if len(result["text"]) > 260 else ""
 
             rows_html += f"""
             <div class="src-ref-row">
@@ -2460,68 +2634,53 @@ def render_sources(search_results: list):
         src_panel_html = f"""
         <style>
           .src-panel {{
-            border: 1px solid #d8ddd0; border-radius: 8px; overflow: hidden;
-            font-family: system-ui, -apple-system, sans-serif; margin: 4px 0;
+            border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif; margin: 4px 0;
             background: #ffffff;
           }}
           .src-ref-row {{
             display: flex; align-items: flex-start; gap: 10px;
-            padding: 10px 12px; border-bottom: 1px solid #e8ebe2;
+            padding: 10px 14px; border-bottom: 1px solid #f1f5f9;
             transition: background 0.15s;
           }}
           .src-ref-row:last-child {{ border-bottom: none; }}
-          .src-ref-row:hover {{ background: #f0f2ec; }}
+          .src-ref-row:hover {{ background: #eff6ff; }}
           .src-ref-num {{
             font-family: 'JetBrains Mono', 'Courier New', monospace;
             font-size: 0.65rem; font-weight: 700;
-            background: #7a9e3a; color: #ffffff;
-            border-radius: 4px; padding: 1px 6px; flex-shrink: 0; margin-top: 2px;
+            background: #2563eb; color: #ffffff;
+            border-radius: 6px; padding: 2px 7px; flex-shrink: 0; margin-top: 2px;
           }}
           .src-ref-meta {{ flex: 1; min-width: 0; }}
           .src-ref-file {{
-            font-family: 'JetBrains Mono', 'Courier New', monospace;
-            font-size: 0.72rem; color: #8a6e2a;
+            font-size: 0.75rem; color: #334155;
             font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
           }}
           .src-ref-page {{
-            font-size: 0.68rem; color: #7a8070; margin: 1px 0 3px;
+            font-size: 0.7rem; color: #64748b; margin: 2px 0 4px;
           }}
           .src-ref-text {{
-            font-size: 0.78rem; color: #3a4030; line-height: 1.45;
+            font-size: 0.8rem; color: #475569; line-height: 1.5;
           }}
           .relevance-bar {{
             display: flex; flex-direction: column; align-items: flex-end;
             gap: 4px; flex-shrink: 0; min-width: 60px;
           }}
           .relevance-val {{
-            font-size: 0.68rem; font-weight: 700; color: #5a6050;
+            font-size: 0.68rem; font-weight: 700; color: #2563eb;
             font-family: 'JetBrains Mono', monospace;
           }}
           .relevance-track {{
-            width: 56px; height: 4px; background: #e0e4d8; border-radius: 2px; overflow: hidden;
+            width: 56px; height: 4px; background: #e2e8f0; border-radius: 2px; overflow: hidden;
           }}
           .relevance-fill {{
-            height: 100%; background: linear-gradient(90deg, #7a9e3a, #4B5320);
+            height: 100%; background: linear-gradient(90deg, #2563eb, #0d9488);
             border-radius: 2px; transition: width 0.4s ease;
           }}
         </style>
         <div class="src-panel">{rows_html}</div>
         """
-        components.html(src_panel_html, height=min(80 + len(search_results) * 90, 600), scrolling=True)
-
-        # Page image viewer
-        for result in search_results:
-            meta   = result.get("metadata", {})
-            source = meta.get("source_file", "")
-            page   = meta.get("page_number")
-            if source and isinstance(page, int):
-                pdf_path = KNOWLEDGE_BASE_DIR / source
-                if pdf_path.exists():
-                    proc     = get_pdf_processor()
-                    img_path = proc.extract_page_as_image(pdf_path, page)
-                    if img_path and Path(img_path).exists():
-                        with st.expander(f"🖼️  {html_mod.escape(source)} — Page {page}", expanded=False):
-                            st.image(img_path, width="stretch")
+        components.html(src_panel_html, height=min(80 + len(search_results) * 95, 600), scrolling=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2571,17 +2730,17 @@ def render_print_button(content: str, msg_index: int, sources: list = None):
     js = f"""
     <button id="pb_{msg_index}" style="
       display:inline-flex;align-items:center;gap:6px;
-      background:transparent;border:1px solid #3a3d32;border-radius:6px;
-      padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;
-      font-family:'JetBrains Mono',monospace;color:#6b7b3a;
-      margin-top:4px;transition:all .18s ease;">
+      background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;
+      padding:5px 14px;font-size:12px;font-weight:500;cursor:pointer;
+      font-family:'Inter',system-ui,sans-serif;color:#64748b;
+      margin-top:4px;transition:all .2s ease;">
       🖨️ Print
     </button>
     <script>
     (function(){{
       var btn = document.getElementById('pb_{msg_index}');
-      btn.onmouseenter = function(){{ this.style.background='rgba(75,83,32,.2)'; this.style.color='#8a9e4e'; }};
-      btn.onmouseleave = function(){{ this.style.background='transparent'; this.style.color='#6b7b3a'; }};
+      btn.onmouseenter = function(){{ this.style.background='#eff6ff'; this.style.borderColor='#93c5fd'; this.style.color='#2563eb'; }};
+      btn.onmouseleave = function(){{ this.style.background='#ffffff'; this.style.borderColor='#e2e8f0'; this.style.color='#64748b'; }};
       function dec(b64){{
         var r=atob(b64),bytes=new Uint8Array(r.length);
         for(var i=0;i<r.length;i++) bytes[i]=r.charCodeAt(i);
@@ -2592,35 +2751,35 @@ def render_print_button(content: str, msg_index: int, sources: list = None):
         var w=window.open('','_blank','width=820,height=950');
         var d=w.document; d.open();
         d.write('<!DOCTYPE html><html><head><meta charset="UTF-8">');
-        d.write('<title>HMMWV TM Assistant — Print</title>');
+        d.write('<title>HMMWV Assistant — Print</title>');
         d.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/15.0.6/marked.min.js"><' + '/script>');
         d.write('<style>');
         d.write('*{{box-sizing:border-box;margin:0;padding:0}}');
-        d.write('body{{font-family:Segoe UI,system-ui,sans-serif;color:#1a1a1a;background:#fff;max-width:780px;margin:0 auto;padding:24px}}');
-        d.write('.hdr{{border-bottom:3px solid #4B5320;padding-bottom:14px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:flex-end}}');
-        d.write('.hdr-title{{font-size:17px;font-weight:700;color:#2d3520;font-family:monospace;letter-spacing:1px}}');
-        d.write('.hdr-meta{{font-size:11px;color:#777;font-family:monospace}}');
-        d.write('.content{{line-height:1.65}}');
-        d.write('h1,h2,h3,h4{{color:#2d3520;margin:16px 0 8px;line-height:1.3}}');
-        d.write('h1{{font-size:20px;border-bottom:2px solid #e0e0e0;padding-bottom:6px}}');
+        d.write('body{{font-family:Inter,system-ui,sans-serif;color:#1e293b;background:#fff;max-width:780px;margin:0 auto;padding:28px}}');
+        d.write('.hdr{{border-bottom:2px solid #2563eb;padding-bottom:14px;margin-bottom:22px;display:flex;justify-content:space-between;align-items:flex-end}}');
+        d.write('.hdr-title{{font-size:17px;font-weight:700;color:#1e293b}}');
+        d.write('.hdr-meta{{font-size:11px;color:#64748b}}');
+        d.write('.content{{line-height:1.7;font-size:15px}}');
+        d.write('h1,h2,h3,h4{{color:#1e293b;margin:18px 0 8px;line-height:1.3}}');
+        d.write('h1{{font-size:20px;border-bottom:1px solid #e2e8f0;padding-bottom:8px}}');
         d.write('h2{{font-size:17px}}h3{{font-size:15px}}');
         d.write('p{{margin:8px 0}}ul,ol{{margin:8px 0 8px 22px}}li{{margin:4px 0}}');
-        d.write('code{{background:#f4f4f4;padding:1px 5px;border-radius:3px;font-size:12px;font-family:monospace}}');
-        d.write('pre{{background:#f5f5f5;padding:12px;border-radius:6px;border:1px solid #ddd;overflow-x:auto;margin:10px 0}}');
+        d.write('code{{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:12px;font-family:monospace}}');
+        d.write('pre{{background:#f8fafc;padding:14px;border-radius:8px;border:1px solid #e2e8f0;overflow-x:auto;margin:10px 0}}');
         d.write('pre code{{background:none;padding:0;font-size:12px}}');
         d.write('table{{border-collapse:collapse;width:100%;margin:12px 0}}');
-        d.write('th,td{{border:1px solid #ccc;padding:6px 10px;font-size:13px;text-align:left}}');
-        d.write('th{{background:#f0f0e8;font-weight:600;color:#2d3520}}');
-        d.write('blockquote{{border-left:3px solid #4B5320;padding:6px 12px;color:#555;background:#f9f9f4;margin:10px 0}}');
-        d.write('strong{{color:#2d3520}}');
-        d.write('img{{max-width:100%;border-radius:4px}}');
-        d.write('.print-btn{{display:flex;justify-content:center;margin-top:24px}}');
+        d.write('th,td{{border:1px solid #e2e8f0;padding:8px 12px;font-size:13px;text-align:left}}');
+        d.write('th{{background:#f1f5f9;font-weight:600;color:#1e293b}}');
+        d.write('blockquote{{border-left:3px solid #2563eb;padding:8px 14px;color:#475569;background:#eff6ff;margin:10px 0;border-radius:0 6px 6px 0}}');
+        d.write('strong{{color:#1e293b}}');
+        d.write('img{{max-width:100%;border-radius:6px}}');
+        d.write('.print-btn{{display:flex;justify-content:center;margin-top:28px}}');
         d.write('.print-btn button{{padding:10px 28px;font-size:14px;cursor:pointer;');
-        d.write('background:#4B5320;color:white;border:none;border-radius:6px;font-weight:600;letter-spacing:.5px}}');
+        d.write('background:#2563eb;color:white;border:none;border-radius:8px;font-weight:600}}');
         d.write('@media print{{.print-btn{{display:none}}img{{page-break-inside:avoid}}}}');
         d.write('</style></head><body>');
         d.write('<div class="hdr">');
-        d.write('<div><div class="hdr-title">🔧 HMMWV Technical Assistant</div>');
+        d.write('<div><div class="hdr-title">HMMWV Assistant</div>');
         d.write('<div class="hdr-meta">Vehicle: {variant} &nbsp;·&nbsp; {timestamp}</div></div></div>');
         d.write('<div class="content" id="c"></div>');
         d.write('<div id="s"></div>');
@@ -2718,14 +2877,13 @@ def search_youtube(user_input: str, vehicle_variant: str = "",
 
 
 def render_youtube_videos(videos: list, query: str = ""):
-    """Render a styled card grid of YouTube search results."""
+    """Render a compact horizontal strip of YouTube search results."""
     if not videos:
         return
 
-    # Section header
     st.markdown(
-        "<div style='font-size:12px;font-weight:600;color:#c62828;"
-        "margin:14px 0 8px;letter-spacing:.4px'>▶ RELATED VIDEOS</div>",
+        "<div style='font-size:0.78rem;font-weight:600;color:#64748b;"
+        "margin:14px 0 8px;'>Related Videos</div>",
         unsafe_allow_html=True,
     )
 
@@ -2733,19 +2891,18 @@ def render_youtube_videos(videos: list, query: str = ""):
     for v in videos:
         title   = html_mod.escape(v["title"])
         channel = html_mod.escape(v["channel"])
-        pub     = html_mod.escape(v["published"])
         url     = html_mod.escape(v["url"])
         thumb   = html_mod.escape(v["thumbnail"])
         thumb_html = (
             f'<img src="{thumb}" alt="thumbnail" '
             f'style="width:100%;height:100%;object-fit:cover;display:block;">'
             if thumb else
-            '<div style="width:100%;height:100%;background:#e0e4d8;'
+            '<div style="width:100%;height:100%;background:#f1f5f9;'
             'display:flex;align-items:center;justify-content:center;'
-            'font-size:28px;">▶</div>'
+            'font-size:24px;color:#94a3b8;">▶</div>'
         )
         cards_html += f"""
-        <a href="{url}" target="_blank" style="text-decoration:none;color:inherit">
+        <a href="{url}" target="_blank" style="text-decoration:none;color:inherit;flex-shrink:0;width:200px">
           <div class="yt-card">
             <div class="yt-thumb">
               {thumb_html}
@@ -2753,8 +2910,7 @@ def render_youtube_videos(videos: list, query: str = ""):
             </div>
             <div class="yt-meta">
               <div class="yt-title">{title}</div>
-              <div class="yt-channel">📺 {channel}</div>
-              <div class="yt-date">{pub}</div>
+              <div class="yt-channel">{channel}</div>
             </div>
           </div>
         </a>
@@ -2762,31 +2918,36 @@ def render_youtube_videos(videos: list, query: str = ""):
 
     panel_html = f"""
     <style>
-      .yt-grid {{
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-        gap: 12px;
-        margin: 4px 0 8px;
+      .yt-strip {{
+        display: flex;
+        gap: 10px;
+        overflow-x: auto;
+        padding: 4px 0 8px;
+        scrollbar-width: thin;
       }}
+      .yt-strip::-webkit-scrollbar {{ height: 4px; }}
+      .yt-strip::-webkit-scrollbar-track {{ background: #f1f5f9; }}
+      .yt-strip::-webkit-scrollbar-thumb {{ background: #cbd5e1; border-radius: 2px; }}
       .yt-card {{
-        border: 1px solid #d0d5c8;
-        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
         overflow: hidden;
         background: #ffffff;
         transition: transform .15s, box-shadow .15s;
         cursor: pointer;
+        width: 200px;
       }}
       .yt-card:hover {{
         transform: translateY(-2px);
-        box-shadow: 0 4px 16px rgba(0,0,0,.12);
-        border-color: #c62828;
+        box-shadow: 0 4px 12px rgba(0,0,0,.08);
+        border-color: #93c5fd;
       }}
       .yt-thumb {{
         position: relative;
         width: 100%;
-        padding-top: 56.25%;   /* 16:9 */
+        padding-top: 56.25%;
         overflow: hidden;
-        background: #1a1a1a;
+        background: #0f172a;
       }}
       .yt-thumb img, .yt-thumb > div {{
         position: absolute;
@@ -2797,39 +2958,33 @@ def render_youtube_videos(videos: list, query: str = ""):
         position: absolute;
         top: 50%; left: 50%;
         transform: translate(-50%, -50%);
-        width: 40px; height: 40px;
-        background: rgba(198,40,40,.85);
+        width: 36px; height: 36px;
+        background: rgba(239,68,68,.9);
         border-radius: 50%;
         display: flex; align-items: center; justify-content: center;
-        color: white; font-size: 16px;
+        color: white; font-size: 14px;
         opacity: 0; transition: opacity .15s;
       }}
       .yt-card:hover .yt-play-overlay {{ opacity: 1; }}
-      .yt-meta {{
-        padding: 8px 10px 10px;
-      }}
+      .yt-meta {{ padding: 6px 8px 8px; }}
       .yt-title {{
-        font-family: system-ui, sans-serif;
-        font-size: 12px; font-weight: 600;
-        color: #1e2318; line-height: 1.35;
+        font-family: 'Inter', system-ui, sans-serif;
+        font-size: 11px; font-weight: 600;
+        color: #1e293b; line-height: 1.35;
         display: -webkit-box;
         -webkit-line-clamp: 2;
         -webkit-box-orient: vertical;
         overflow: hidden;
-        margin-bottom: 4px;
+        margin-bottom: 3px;
       }}
       .yt-channel {{
-        font-size: 11px; color: #5a6050;
+        font-size: 10px; color: #64748b;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       }}
-      .yt-date {{
-        font-size: 10px; color: #7a8070; margin-top: 2px;
-        font-family: 'JetBrains Mono', monospace;
-      }}
     </style>
-    <div class="yt-grid">{cards_html}</div>
+    <div class="yt-strip">{cards_html}</div>
     """
-    components.html(panel_html, height=280, scrolling=False)
+    components.html(panel_html, height=210, scrolling=False)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -2914,21 +3069,21 @@ def _build_progress_html(pct: float, label: str, elapsed: float,
                           estimate: float | None) -> str:
     """Return self-contained HTML for the progress bar (used by _stream_response)."""
     pct_int  = int(min(pct * 100, 100))
-    color    = "#2e7d32" if pct >= 1.0 else "#5c7a30"
-    fill_bg  = f"linear-gradient(90deg,{color},#8ab840)" if pct < 1.0 else "#2e7d32"
+    color    = "#10b981" if pct >= 1.0 else "#2563eb"
+    fill_bg  = f"linear-gradient(90deg,{color},#60a5fa)" if pct < 1.0 else "#10b981"
     pulse    = "" if pct >= 1.0 else "animation:pulse 1s infinite"
-    dot_col  = "#2e7d32" if pct >= 1.0 else "#5c7a30"
+    dot_col  = "#10b981" if pct >= 1.0 else "#2563eb"
     eta_html = ""
     if estimate and pct < 1.0:
         remaining = max(0.0, estimate - elapsed)
         if remaining > 0.5:
-            eta_html = f'<span style="color:#7a8070;font-size:11px;font-style:italic">~{remaining:.0f}s remaining</span>'
+            eta_html = f'<span style="color:#64748b;font-size:11px;font-style:italic">~{remaining:.0f}s remaining</span>'
         else:
-            eta_html = '<span style="color:#5c7a30;font-size:11px;font-style:italic">almost done…</span>'
+            eta_html = '<span style="color:#2563eb;font-size:11px;font-style:italic">almost done...</span>'
     return f"""
-<div style="font-family:system-ui,sans-serif;padding:8px 0 4px">
+<div style="font-family:'Inter',system-ui,sans-serif;padding:8px 0 4px">
   <div style="display:flex;justify-content:space-between;align-items:center;
-              font-size:12px;color:#3a4030;margin-bottom:6px;font-weight:500">
+              font-size:12px;color:#334155;margin-bottom:6px;font-weight:500">
     <span style="display:flex;align-items:center;gap:7px">
       <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
                    background:{dot_col};{pulse}"></span>
@@ -2936,8 +3091,8 @@ def _build_progress_html(pct: float, label: str, elapsed: float,
     </span>
     {eta_html}
   </div>
-  <div style="height:6px;background:#e0e4d8;border-radius:3px;overflow:hidden">
-    <div style="height:100%;width:{pct_int}%;border-radius:3px;
+  <div style="height:4px;background:#e2e8f0;border-radius:2px;overflow:hidden">
+    <div style="height:100%;width:{pct_int}%;border-radius:2px;
                 background:{fill_bg};transition:width .25s ease"></div>
   </div>
 </div>
@@ -2949,9 +3104,7 @@ def render_inline_images(search_results: list):
     """
     Show page images from search_results directly below the response.
     Deduplicated by (source_file, page_number) so the same page appears once.
-    Only shown when the assistant response contains step-by-step content
-    (detected by numbered list or 'Step' headers in the markdown).
-    Images are shown in a compact horizontal strip with captions.
+    Images shown in a 2-column layout with zoomable lightbox on click.
     """
     if not search_results:
         return
@@ -2973,28 +3126,59 @@ def render_inline_images(search_results: list):
         pdf_path = KNOWLEDGE_BASE_DIR / source
         if not pdf_path.exists():
             continue
-        img_path = proc.extract_page_as_image(pdf_path, page)
+        img_path = proc.extract_page_as_image(pdf_path, page, dpi=300)
         if img_path and Path(img_path).exists():
-            label = f"📄 {source}  —  p.{page}"
+            label = f"{source} - Page {page}"
             image_items.append((label, img_path))
 
     if not image_items:
         return
 
     st.markdown(
-        "<div style='font-size:12px;font-weight:600;color:#5c7a30;"
-        "margin:10px 0 6px;letter-spacing:.4px'>📷 REFERENCE PAGES</div>",
+        "<div style='font-size:0.78rem;font-weight:600;color:#2563eb;"
+        "margin:12px 0 8px;'>Reference Diagrams</div>",
         unsafe_allow_html=True,
     )
 
-    # Layout: up to 3 images per row
-    cols_per_row = min(3, len(image_items))
+    # Layout: up to 2 images per row (larger for readability)
+    cols_per_row = min(2, len(image_items))
     for row_start in range(0, len(image_items), cols_per_row):
         batch = image_items[row_start: row_start + cols_per_row]
         cols  = st.columns(len(batch))
         for col, (label, img_path) in zip(cols, batch):
             with col:
-                st.image(img_path, caption=label, width="stretch")
+                # Read image and build lightbox via components.html
+                try:
+                    img_bytes = Path(img_path).read_bytes()
+                    img_b64 = base64.b64encode(img_bytes).decode()
+                    safe_label = html_mod.escape(label)
+                    lightbox_html = f"""
+                    <div style="cursor:pointer;border:1px solid #e2e8f0;border-radius:10px;
+                                overflow:hidden;transition:all .2s" id="img-wrap"
+                         onmouseenter="this.style.boxShadow='0 4px 12px rgba(0,0,0,.1)'"
+                         onmouseleave="this.style.boxShadow='none'">
+                      <img src="data:image/png;base64,{img_b64}" style="width:100%;display:block"
+                           onclick="document.getElementById('lb-overlay').style.display='flex'" />
+                      <div style="padding:6px 10px;font-size:12px;color:#64748b;
+                                  background:#f8fafc;border-top:1px solid #e2e8f0">
+                        {safe_label}
+                      </div>
+                    </div>
+                    <div id="lb-overlay" style="display:none;position:fixed;inset:0;z-index:9999;
+                         background:rgba(0,0,0,.85);justify-content:center;align-items:center;
+                         cursor:zoom-out" onclick="this.style.display='none'">
+                      <img src="data:image/png;base64,{img_b64}"
+                           style="max-width:92vw;max-height:92vh;border-radius:8px;
+                                  box-shadow:0 8px 32px rgba(0,0,0,.4)" />
+                      <div style="position:absolute;top:16px;right:20px;color:#fff;font-size:28px;
+                                  cursor:pointer;font-weight:300">✕</div>
+                      <div style="position:absolute;bottom:16px;color:#94a3b8;font-size:13px">
+                        {safe_label} — Click anywhere to close</div>
+                    </div>
+                    """
+                    components.html(lightbox_html, height=350)
+                except Exception:
+                    st.image(img_path, caption=label, use_container_width=True)
 
 
 def _run_multi_agent_response(placeholder, user_input: str,
@@ -3206,12 +3390,15 @@ def render_chat():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def main():
-    render_sidebar()
-    render_topbar()
-    render_mode_selector()
-    if not st.session_state.messages:
-        render_welcome()
-    render_chat()
+    if st.session_state.current_page == "settings":
+        render_settings_page()
+    else:
+        render_sidebar()
+        render_topbar()
+        render_mode_selector()
+        if not st.session_state.messages:
+            render_welcome()
+        render_chat()
 
 
 if __name__ == "__main__":
