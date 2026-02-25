@@ -25,7 +25,7 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from config import (
-    load_settings, EXTRACTED_IMAGES_DIR, TOP_K_RESULTS,
+    load_settings, EXTRACTED_IMAGES_DIR, KNOWLEDGE_BASE_DIR, TOP_K_RESULTS,
     PROVIDER_OLLAMA, PROVIDER_OPENAI, PROVIDER_ANTHROPIC,
     OLLAMA_DEFAULT_URL, OLLAMA_DEFAULT_MODEL,
     OPENAI_DEFAULT_URL, OPENAI_DEFAULT_MODEL,
@@ -65,29 +65,66 @@ def _make_main_engine(settings: dict) -> AIEngine:
 
 def _find_images(search_results: list, max_images: int = 12) -> list:
     """
-    Glob extracted_images/{pdf-stem}/*_p{NNNN}_img*.png for pages
-    that appear in the top search results. Returns list of ImageRef dicts.
+    Find images for pages that appear in the top search results.
+
+    Strategy (two-pass per page):
+      1. Return pre-extracted embedded raster images if present.
+         Military TMs sometimes embed photos this way.
+      2. Fall back to a full-page render (PNG at 150 dpi).
+         This is the correct approach for TM technical diagrams, which are
+         drawn as vector graphics — invisible to pdfplumber page.images but
+         perfectly captured by rendering the page to a raster image.
+         The rendered file is cached on disk; subsequent requests are instant.
+
+    Returns list of ImageRef dicts: {url, source, page}.
     """
+    from dependencies import get_pdf_processor   # local import avoids circular
+
     images = []
     seen   = set()
+    proc   = get_pdf_processor()
+
     for result in search_results:
-        meta       = result.get("metadata", {})
+        meta        = result.get("metadata", {})
         source_file = meta.get("source_file", "")
         page_num    = meta.get("page_number", 0)
         if not source_file or not page_num:
             continue
+
+        page_int   = int(page_num)
         source_dir = source_file.replace(".pdf", "").replace(".PDF", "")
         img_dir    = EXTRACTED_IMAGES_DIR / source_dir
-        if not img_dir.exists():
-            continue
-        page_str = f"p{int(page_num):04d}"
-        for img_path in sorted(img_dir.glob(f"*_{page_str}_img*.png")):
-            url = f"/images/{source_dir}/{img_path.name}"
-            if url not in seen:
-                seen.add(url)
-                images.append({"url": url, "source": source_file, "page": int(page_num)})
+        page_str   = f"p{page_int:04d}"
+
+        # ── 1. Pre-extracted embedded raster images ────────────────────────
+        found_embedded = False
+        if img_dir.exists():
+            for img_path in sorted(img_dir.glob(f"*_{page_str}_img*.png")):
+                url = f"/images/{source_dir}/{img_path.name}"
+                if url not in seen:
+                    seen.add(url)
+                    images.append({"url": url, "source": source_file, "page": page_int})
+                    found_embedded = True
+
+        # ── 2. Full-page render fallback (catches vector diagrams) ─────────
+        if not found_embedded:
+            render_name = f"page_{page_int:04d}_150dpi.png"
+            render_path = EXTRACTED_IMAGES_DIR / source_dir / "pages" / render_name
+            render_url  = f"/images/{source_dir}/pages/{render_name}"
+
+            if not render_path.exists():
+                # Render on demand — result is cached so next request is fast
+                pdf_path = KNOWLEDGE_BASE_DIR / source_file
+                if pdf_path.exists():
+                    proc.extract_page_as_image(pdf_path, page_int, dpi=150)
+
+            if render_path.exists() and render_url not in seen:
+                seen.add(render_url)
+                images.append({"url": render_url, "source": source_file, "page": page_int})
+
         if len(images) >= max_images:
             break
+
     return images[:max_images]
 
 
@@ -203,7 +240,10 @@ async def chat_stream(request: ChatRequest):
                  "distance": r["distance"], "id": r["id"]}
                 for r in used_results
             ]
-            images  = _find_images(used_results)
+            # Run in executor: _find_images may render PDF pages (blocking I/O)
+            images = await asyncio.get_event_loop().run_in_executor(
+                None, _find_images, used_results
+            )
 
             yield _sse({"type": "sources", "data": sources})
             yield _sse({"type": "images",  "data": images})

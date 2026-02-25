@@ -129,3 +129,8 @@ class KnowledgeStats(BaseModel):
 class IndexResponse(BaseModel):
     indexed: int
     chunks_added: int
+
+
+class RenderPagesResponse(BaseModel):
+    message: str
+    total_pdfs: int

@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Shield } from 'lucide-react'
+import { Shield, Cpu } from 'lucide-react'
 import SidebarTabs from '../sidebar/SidebarTabs'
 import SessionList from '../sidebar/SessionList'
+import { useSettingsStore } from '../../store/useSettingsStore'
 
 type Tab = 'chat' | 'docs' | 'settings'
 
@@ -10,6 +11,17 @@ export default function Sidebar() {
   const [activeTab, setActiveTab] = useState<Tab>('chat')
   const navigate  = useNavigate()
   const location  = useLocation()
+  const { settings } = useSettingsStore()
+
+  // Derive the active model label from settings
+  const modelLabel = (() => {
+    if (!settings) return 'Not configured'
+    const p = settings.provider ?? ''
+    if (p === 'Ollama (Local)')    return settings.ollama_model    || 'Ollama'
+    if (p === 'OpenAI Compatible') return settings.openai_model    || 'OpenAI'
+    if (p === 'Anthropic')         return settings.anthropic_model || 'Claude'
+    return p
+  })()
 
   const handleTab = (tab: Tab) => {
     setActiveTab(tab)
@@ -71,17 +83,18 @@ export default function Sidebar() {
         )}
       </div>
 
-      {/* Status footer */}
+      {/* Model footer */}
       <div
         className="flex items-center gap-2 px-4 py-3 border-t"
         style={{ borderColor: 'var(--color-border)' }}
       >
+        <Cpu size={12} style={{ color: 'var(--color-olive)', flexShrink: 0 }} />
         <span
-          className="inline-block w-2 h-2 rounded-full"
-          style={{ backgroundColor: 'var(--color-olive)' }}
-        />
-        <span className="text-xs font-mono" style={{ color: 'var(--color-muted)' }}>
-          CLOUD AI
+          className="text-xs font-mono truncate"
+          style={{ color: 'var(--color-muted)' }}
+          title={modelLabel}
+        >
+          {modelLabel}
         </span>
       </div>
     </aside>

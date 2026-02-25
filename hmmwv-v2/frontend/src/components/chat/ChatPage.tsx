@@ -78,20 +78,19 @@ export default function ChatPage() {
           {sessionTitle}
         </span>
 
-        {/* Cloud status pill */}
-        <div
-          className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-mono"
-          style={{
-            backgroundColor: 'var(--color-bg-surface)',
-            border: '1px solid var(--color-border)',
-          }}
-        >
+        {/* Message count badge — only shown when session has messages */}
+        {(activeSession?.messages?.length ?? 0) > 0 && (
           <span
-            className="inline-block w-1.5 h-1.5 rounded-full"
-            style={{ backgroundColor: 'var(--color-olive)' }}
-          />
-          <span style={{ color: 'var(--color-muted)' }}>CLOUD</span>
-        </div>
+            className="text-xs font-mono px-2 py-0.5 rounded"
+            style={{
+              backgroundColor: 'var(--color-bg-surface)',
+              border: '1px solid var(--color-border)',
+              color: 'var(--color-muted)',
+            }}
+          >
+            {activeSession!.messages.length} msg{activeSession!.messages.length !== 1 ? 's' : ''}
+          </span>
+        )}
       </div>
 
       {/* Messages */}

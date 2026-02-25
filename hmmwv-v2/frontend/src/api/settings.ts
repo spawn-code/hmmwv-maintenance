@@ -28,6 +28,12 @@ export const knowledgeApi = {
   index: () =>
     apiFetch<{ indexed: number; chunks_added: number }>('/knowledge/index', { method: 'POST' }),
 
+  renderPages: (dpi = 150) =>
+    apiFetch<{ message: string; total_pdfs: number }>(
+      `/knowledge/render-pages?dpi=${dpi}`,
+      { method: 'POST' },
+    ),
+
   clear: () =>
     apiFetch<{ ok: boolean }>('/knowledge/index', { method: 'DELETE' }),
 }
